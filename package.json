@@ -1,0 +1,44 @@
+{
+  "name": "astro-ask",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "verify": "tsx scripts/verify-ephemeris.ts",
+    "verify:geo": "tsx scripts/verify-geo.ts",
+    "verify:charts": "tsx scripts/verify-charts.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/elFabri05/astro-ask.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/elFabri05/astro-ask/issues"
+  },
+  "homepage": "https://github.com/elFabri05/astro-ask#readme",
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "geo-tz": "^8.1.7",
+    "luxon": "^3.7.2",
+    "next": "^14.2.35",
+    "node-geocoder": "^4.4.1",
+    "prisma": "^5.22.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "sweph": "^2.10.3-7",
+    "tsx": "^4.22.4",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/luxon": "^3.7.2",
+    "@types/node": "^26.1.0",
+    "@types/node-geocoder": "^4.2.6",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^6.0.3"
+  }
+}

@@ -1,0 +1,25 @@
+// Change provider to "postgresql" and update url to port to Postgres/Supabase.
+// chartData uses String (not Json) so it stays portable across both providers.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model BirthChart {
+  id          String   @id @default(cuid())
+  name        String?
+  birthDate   String   // "YYYY-MM-DD", local
+  birthTime   String   // "HH:mm", local
+  placeLabel  String
+  latitude    Float
+  longitude   Float
+  timezone    String   // IANA name, from resolveUtcInstant
+  utcDateTime String   // ISO 8601 UTC, frozen at write time
+  chartData   String   // JSON.stringify(ChartData), frozen at write time
+  createdAt   DateTime @default(now())
+}
