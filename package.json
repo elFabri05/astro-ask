@@ -7,7 +7,10 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "verify": "tsx scripts/verify-ephemeris.ts",
     "verify:geo": "tsx scripts/verify-geo.ts",
-    "verify:charts": "tsx scripts/verify-charts.ts"
+    "verify:charts": "tsx scripts/verify-charts.ts",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
   },
   "repository": {
     "type": "git",
