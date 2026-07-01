@@ -9,6 +9,8 @@ const nextConfig = {
       "geo-tz",
       "@prisma/client",
       "prisma",
+      "ai",
+      "@ai-sdk/anthropic",
     ],
   },
 };
