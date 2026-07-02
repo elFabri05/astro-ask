@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { ChartData } from "@/lib/ephemeris";
 import type { SessionSummary, SessionWithMessages, MessageRecord } from "@/lib/sessions";
-import { ChartWheel } from "./ChartWheel";
+import { CompactChartWheel } from "./CompactChartWheel";
 import { ChatSession } from "./ChatSession";
 import styles from "./ChartWorkspace.module.css";
 
@@ -161,7 +161,7 @@ export function ChartWorkspace({ chart, initialDate, initialSessions, initialAct
       <header className={cx(styles.header, collapsed && styles.collapsed)}>
         <div className={styles.headerInner}>
           <div className={styles.identity}>
-            <ChartWheel
+            <CompactChartWheel
               positions={chart.chartData.positions}
               houses={chart.chartData.houses}
               ascendant={chart.chartData.ascendant}

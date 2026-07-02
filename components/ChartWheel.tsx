@@ -1,131 +1,55 @@
-// Pure SVG rendering — no state, no "use client" needed. Reused at large size
-// in the expanded header and small size in the collapsed strip.
+"use client";
 
-const SIGN_GLYPHS = ["♈", "♉", "♊", "♋", "♌", "♍", "♎", "♏", "♐", "♑", "♒", "♓"];
-
-const PLANET_GLYPHS: Record<string, string> = {
-  Sun: "☉", Moon: "☽", Mercury: "☿", Venus: "♀", Mars: "♂",
-  Jupiter: "♃", Saturn: "♄", Uranus: "♅", Neptune: "♆", Pluto: "♇",
-  "True Node": "☊", Chiron: "⚷",
-};
-
-export interface ChartWheelPosition {
-  body: string;
-  longitude: number;
-}
-
-export interface ChartWheelHouse {
-  house: number;
-  longitude: number;
-}
+import { useEffect, useId, useRef } from "react";
+import type { ChartData } from "@/lib/ephemeris";
+import { toAstroChartData } from "@/lib/chartAdapter";
+import styles from "./ChartWheel.module.css";
 
 interface Props {
-  positions: ChartWheelPosition[];
-  houses: ChartWheelHouse[];
-  ascendant: number;
-  size?: number;
-  compact?: boolean;
+  chart: ChartData;
 }
 
-// Ascendant sits at 9 o'clock; the zodiac advances counter-clockwise from it —
-// the traditional chart-wheel orientation.
-function pointOn(lon: number, ascendant: number, radius: number, cx: number, cy: number) {
-  const delta = (((lon - ascendant) % 360) + 360) % 360;
-  const theta = ((180 + delta) * Math.PI) / 180;
-  return { x: cx + radius * Math.cos(theta), y: cy - radius * Math.sin(theta) };
-}
+const SIZE = 480;
 
-export function ChartWheel({ positions, houses, ascendant, size = 200, compact = false }: Props) {
-  const cx = size / 2;
-  const cy = size / 2;
-  const rOuter = size / 2 - (compact ? 2 : 20);
-  const rTick  = rOuter - (compact ? 3 : 10);
-  const rPlanet = rOuter * 0.72;
-  const rHouseNum = rOuter * 0.9;
+export function ChartWheel({ chart }: Props) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  // astrochart looks up its root by DOM id (document.getElementById), so the
+  // id must be a valid, unique HTML id — sanitize React's useId() output.
+  const elementId = `chart-wheel-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
 
-  const sortedHouses = [...houses].sort((a, b) => a.house - b.house);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    let cancelled = false;
 
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox={`0 0 ${size} ${size}`}
-      role="img"
-      aria-label="Chart wheel"
-    >
-      <circle cx={cx} cy={cy} r={rOuter} fill="none" stroke="var(--border)" strokeWidth={compact ? 1 : 1.5} />
-      {!compact && (
-        <circle cx={cx} cy={cy} r={rPlanet * 1.18} fill="none" stroke="var(--border)" strokeWidth={1} opacity={0.6} />
-      )}
+    // astrochart's bundle references `self` at module-eval time (browser
+    // global), which throws during Next.js SSR. A dynamic import here only
+    // ever runs client-side (effects never run during SSR), so the module
+    // is never evaluated on the server.
+    import("@astrodraw/astrochart").then(({ Chart }) => {
+      if (cancelled || !containerRef.current) return;
 
-      {/* zodiac sign ticks, every 30° from the Ascendant's frame */}
-      {!compact && Array.from({ length: 12 }).map((_, i) => {
-        const lon = i * 30;
-        const tickOuter = pointOn(lon, 0, rOuter, cx, cy);
-        const tickInner = pointOn(lon, 0, rTick, cx, cy);
-        const glyphPos  = pointOn(lon + 15, 0, rOuter + 11, cx, cy);
-        return (
-          <g key={`sign-${i}`}>
-            <line
-              x1={tickOuter.x} y1={tickOuter.y} x2={tickInner.x} y2={tickInner.y}
-              stroke="var(--border)" strokeWidth={1}
-            />
-            <text
-              x={glyphPos.x} y={glyphPos.y}
-              textAnchor="middle" dominantBaseline="central"
-              fontSize={10} fill="var(--text-muted)"
-            >
-              {SIGN_GLYPHS[i]}
-            </text>
-          </g>
-        );
-      })}
+      // astrochart appends a fresh <svg> into the root element on every
+      // radix() call — clear whatever we drew last time first.
+      container.innerHTML = "";
 
-      {/* house cusps, radiating from center */}
-      {sortedHouses.map(h => {
-        const outer = pointOn(h.longitude, ascendant, rOuter, cx, cy);
-        const isAngle = h.house === 1 || h.house === 10;
-        return (
-          <line
-            key={`cusp-${h.house}`}
-            x1={cx} y1={cy} x2={outer.x} y2={outer.y}
-            stroke={isAngle ? "var(--accent)" : "var(--border)"}
-            strokeWidth={isAngle ? 1.5 : 0.75}
-            opacity={isAngle ? 0.9 : 0.5}
-          />
-        );
-      })}
+      const astroChart = new Chart(elementId, SIZE, SIZE);
+      astroChart.radix(toAstroChartData(chart));
 
-      {!compact && sortedHouses.map(h => {
-        const nextLon = sortedHouses[h.house % 12].longitude;
-        const mid = pointOn(h.longitude + (((nextLon - h.longitude) % 360 + 360) % 360) / 2, ascendant, rHouseNum, cx, cy);
-        return (
-          <text
-            key={`hn-${h.house}`}
-            x={mid.x} y={mid.y}
-            textAnchor="middle" dominantBaseline="central"
-            fontSize={8} fill="var(--text-muted)" opacity={0.7}
-          >
-            {h.house}
-          </text>
-        );
-      })}
+      // The library sets fixed pixel width/height; let it scale down on
+      // narrower screens via the viewBox it already sets.
+      const svg = container.querySelector("svg");
+      if (svg) {
+        svg.style.width = "100%";
+        svg.style.height = "auto";
+      }
+    });
 
-      {/* planets */}
-      {positions.map(p => {
-        const pos = pointOn(p.longitude, ascendant, rPlanet, cx, cy);
-        return (
-          <text
-            key={p.body}
-            x={pos.x} y={pos.y}
-            textAnchor="middle" dominantBaseline="central"
-            fontSize={compact ? 9 : 13}
-            fill="var(--text)"
-          >
-            {PLANET_GLYPHS[p.body] ?? p.body[0]}
-          </text>
-        );
-      })}
-    </svg>
-  );
+    return () => {
+      cancelled = true;
+      container.innerHTML = "";
+    };
+  }, [chart, elementId]);
+
+  return <div id={elementId} ref={containerRef} className={styles.wheel} />;
 }
