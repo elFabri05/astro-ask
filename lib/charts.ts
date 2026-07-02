@@ -80,5 +80,23 @@ export async function getBirthChart(id: string): Promise<BirthChartRecord | null
   return row ? toRecord(row) : null;
 }
 
+export interface BirthChartSummary {
+  id:         string;
+  name:       string | null;
+  birthDate:  string;
+  placeLabel: string;
+  createdAt:  Date;
+}
+
+// Lightweight listing for the sidebar — no chartData parse needed.
+// Single-user for now: unfiltered. When auth lands, this should take a
+// userId and filter by it (e.g. `where: { userId }`).
+export async function listBirthCharts(): Promise<BirthChartSummary[]> {
+  return prisma.birthChart.findMany({
+    select: { id: true, name: true, birthDate: true, placeLabel: true, createdAt: true },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
 // Re-export ZodError so route handlers can import it from one place
 export { ZodError };

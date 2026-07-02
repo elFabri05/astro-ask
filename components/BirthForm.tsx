@@ -95,6 +95,7 @@ export default function BirthForm() {
 
       if (res.status === 201) {
         router.push(`/chart/${data.id}`);
+        router.refresh(); // the sidebar (in the shared layout) must see the new chart
         return;
       }
 
