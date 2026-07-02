@@ -35,8 +35,8 @@ model Interpretation {
   content        String        // generated text from the LLM
   model          String        // which model produced it
   createdAt      DateTime      @default(now())
-  chart          BirthChart    @relation(fields: [chartId], references: [id])
-  transitChart   TransitChart? @relation(fields: [transitChartId], references: [id])
+  chart          BirthChart    @relation(fields: [chartId], references: [id], onDelete: Cascade)
+  transitChart   TransitChart? @relation(fields: [transitChartId], references: [id], onDelete: Cascade)
 }
 
 model TransitChart {
@@ -45,7 +45,7 @@ model TransitChart {
   targetDate      String           // "YYYY-MM-DD"
   transitData     String           // JSON.stringify(TransitData), frozen
   createdAt       DateTime         @default(now())
-  chart           BirthChart       @relation(fields: [chartId], references: [id])
+  chart           BirthChart       @relation(fields: [chartId], references: [id], onDelete: Cascade)
   interpretations Interpretation[]
   sessions        Session[]
 
@@ -58,8 +58,8 @@ model Session {
   transitChartId String?       // null = a natal session; set = a transit session
   title          String?       // auto-generated from first user question
   createdAt      DateTime      @default(now())
-  chart          BirthChart    @relation(fields: [chartId], references: [id])
-  transitChart   TransitChart? @relation(fields: [transitChartId], references: [id])
+  chart          BirthChart    @relation(fields: [chartId], references: [id], onDelete: Cascade)
+  transitChart   TransitChart? @relation(fields: [transitChartId], references: [id], onDelete: Cascade)
   messages       Message[]
 }
 
@@ -69,5 +69,5 @@ model Message {
   role      String   // "user" | "assistant"
   content   String
   createdAt DateTime @default(now())
-  session   Session  @relation(fields: [sessionId], references: [id])
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 }

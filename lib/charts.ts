@@ -80,6 +80,13 @@ export async function getBirthChart(id: string): Promise<BirthChartRecord | null
   return row ? toRecord(row) : null;
 }
 
+// Cascades in the DB (onDelete: Cascade on every relation back to
+// BirthChart) — interpretations, transit charts, sessions, and their
+// messages all go with it. Throws Prisma's P2025 if id doesn't exist.
+export async function deleteBirthChart(id: string): Promise<void> {
+  await prisma.birthChart.delete({ where: { id } });
+}
+
 export interface BirthChartSummary {
   id:         string;
   name:       string | null;

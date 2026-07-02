@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import type { BirthChartSummary } from "@/lib/charts";
 import styles from "./Sidebar.module.css";
 
@@ -20,9 +20,36 @@ function chartLabel(chart: BirthChartSummary): string {
 
 export function Sidebar({ charts }: Props) {
   const pathname = usePathname();
-  const [open, setOpen] = useState(false);
+  const router   = useRouter();
+  const [open, setOpen]       = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const activeId = pathname.match(/^\/chart\/([^/]+)/)?.[1];
+
+  async function handleDelete(chart: BirthChartSummary) {
+    if (!window.confirm(`Delete "${chartLabel(chart)}"? This removes its readings and chat history too.`)) {
+      return;
+    }
+
+    setDeletingId(chart.id);
+    try {
+      const res = await fetch(`/api/charts/${chart.id}`, { method: "DELETE" });
+      if (!res.ok && res.status !== 404) return; // leave it in the list, nothing changed
+
+      if (chart.id === activeId) {
+        // Land on the most recent remaining chart, or /new if none are left.
+        // Don't also call router.refresh() here: it re-validates the
+        // CURRENT (now-deleted) route, which 404s and can win the race
+        // against the pending push, stranding the user on a dead page.
+        const remaining = charts.filter(c => c.id !== chart.id);
+        router.push(remaining.length > 0 ? `/chart/${remaining[0].id}` : "/new");
+      } else {
+        router.refresh(); // still here — just drop the deleted chart from the list
+      }
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   return (
     <>
@@ -51,14 +78,25 @@ export function Sidebar({ charts }: Props) {
             <p className={styles.empty}>No charts yet — create your first one.</p>
           ) : (
             charts.map(chart => (
-              <Link
-                key={chart.id}
-                href={`/chart/${chart.id}`}
-                className={cx(styles.item, chart.id === activeId && styles.itemActive)}
-                onClick={() => setOpen(false)}
-              >
-                {chartLabel(chart)}
-              </Link>
+              <div key={chart.id} className={styles.itemRow}>
+                <Link
+                  href={`/chart/${chart.id}`}
+                  className={cx(styles.item, chart.id === activeId && styles.itemActive)}
+                  onClick={() => setOpen(false)}
+                >
+                  {chartLabel(chart)}
+                </Link>
+                <button
+                  type="button"
+                  className={styles.deleteBtn}
+                  onClick={() => handleDelete(chart)}
+                  disabled={deletingId === chart.id}
+                  aria-label={`Delete ${chartLabel(chart)}`}
+                  title="Delete chart"
+                >
+                  ×
+                </button>
+              </div>
             ))
           )}
         </nav>
