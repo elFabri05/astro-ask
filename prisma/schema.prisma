@@ -24,25 +24,50 @@ model BirthChart {
   createdAt       DateTime         @default(now())
   interpretations Interpretation[]
   transitCharts   TransitChart[]
+  sessions        Session[]
 }
 
 model Interpretation {
-  id        String     @id @default(cuid())
-  chartId   String
-  type      String     // "natal" for this slice; extensible to "transit" etc.
-  content   String     // generated text from the LLM
-  model     String     // which model produced it
-  createdAt DateTime   @default(now())
-  chart     BirthChart @relation(fields: [chartId], references: [id])
+  id             String        @id @default(cuid())
+  chartId        String
+  transitChartId String?       // set for a "transit" opener; null for "natal"
+  type           String        // "natal" | "transit"
+  content        String        // generated text from the LLM
+  model          String        // which model produced it
+  createdAt      DateTime      @default(now())
+  chart          BirthChart    @relation(fields: [chartId], references: [id])
+  transitChart   TransitChart? @relation(fields: [transitChartId], references: [id])
 }
 
 model TransitChart {
-  id          String     @id @default(cuid())
-  chartId     String
-  targetDate  String     // "YYYY-MM-DD"
-  transitData String     // JSON.stringify(TransitData), frozen
-  createdAt   DateTime   @default(now())
-  chart       BirthChart @relation(fields: [chartId], references: [id])
+  id              String           @id @default(cuid())
+  chartId         String
+  targetDate      String           // "YYYY-MM-DD"
+  transitData     String           // JSON.stringify(TransitData), frozen
+  createdAt       DateTime         @default(now())
+  chart           BirthChart       @relation(fields: [chartId], references: [id])
+  interpretations Interpretation[]
+  sessions        Session[]
 
   @@unique([chartId, targetDate])
+}
+
+model Session {
+  id             String        @id @default(cuid())
+  chartId        String
+  transitChartId String?       // null = a natal session; set = a transit session
+  title          String?       // auto-generated from first user question
+  createdAt      DateTime      @default(now())
+  chart          BirthChart    @relation(fields: [chartId], references: [id])
+  transitChart   TransitChart? @relation(fields: [transitChartId], references: [id])
+  messages       Message[]
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  sessionId String
+  role      String   // "user" | "assistant"
+  content   String
+  createdAt DateTime @default(now())
+  session   Session  @relation(fields: [sessionId], references: [id])
 }

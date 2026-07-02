@@ -10,6 +10,7 @@
     "verify:charts": "tsx scripts/verify-charts.ts",
     "verify:prompts": "tsx scripts/verify-prompts.ts",
     "verify:transits": "tsx scripts/verify-transits.ts",
+    "verify:transit-prompt": "tsx scripts/verify-transit-prompt.ts",
     "dev": "next dev",
     "build": "next build",
     "start": "next start"
@@ -27,6 +28,7 @@
   "homepage": "https://github.com/elFabri05/astro-ask#readme",
   "dependencies": {
     "@ai-sdk/google": "^1.2.22",
+    "@ai-sdk/react": "^1.2.12",
     "@prisma/client": "^5.22.0",
     "ai": "^4.3.19",
     "geo-tz": "^8.1.7",

@@ -125,14 +125,30 @@ export function computeTransitData(input: {
   };
 }
 
+// Read-only lookup — never computes. Used both as the cache check inside
+// getOrCreateTransitChart and by callers that must not trigger ephemeris work
+// (e.g. listing sessions for a date that may not have been computed yet).
+export async function findTransitChart(
+  chartId: string,
+  targetDate: string
+): Promise<TransitChartRecord | null> {
+  const row = await prisma.transitChart.findUnique({
+    where: { chartId_targetDate: { chartId, targetDate } },
+  });
+  return row ? toRecord(row) : null;
+}
+
+export async function getTransitChartById(id: string): Promise<TransitChartRecord | null> {
+  const row = await prisma.transitChart.findUnique({ where: { id } });
+  return row ? toRecord(row) : null;
+}
+
 export async function getOrCreateTransitChart(
   chartId: string,
   targetDate: string
 ): Promise<TransitChartRecord> {
-  const existing = await prisma.transitChart.findUnique({
-    where: { chartId_targetDate: { chartId, targetDate } },
-  });
-  if (existing) return toRecord(existing);
+  const existing = await findTransitChart(chartId, targetDate);
+  if (existing) return existing;
 
   const chart = await getBirthChart(chartId);
   if (!chart) throw new ChartNotFoundError(`Chart not found: ${chartId}`);
@@ -152,10 +168,8 @@ export async function getOrCreateTransitChart(
     // Race: another call created the same (chartId, targetDate) row first —
     // the @@unique constraint is the source of truth, so just re-read it.
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
-      const row = await prisma.transitChart.findUnique({
-        where: { chartId_targetDate: { chartId, targetDate } },
-      });
-      if (row) return toRecord(row);
+      const row = await findTransitChart(chartId, targetDate);
+      if (row) return row;
     }
     throw err;
   }

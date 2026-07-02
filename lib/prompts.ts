@@ -1,4 +1,5 @@
 import type { ChartData } from "./ephemeris";
+import type { TransitData } from "./transits";
 
 // ─── system prompt ────────────────────────────────────────────────────────────
 
@@ -42,11 +43,10 @@ function lonToSignLabel(lon: number): string {
   return `${fmtDeg(signDeg)} ${sign}`;
 }
 
-export function buildNatalUserPrompt(chartData: ChartData): string {
+// Shared fact block — natal placements, house cusps, and aspects — reused by
+// the single-shot natal prompt and the transit context (natal side).
+function formatNatalFacts(chartData: ChartData): string[] {
   const lines: string[] = [];
-
-  lines.push("Please interpret this natal chart. All positions below are computed values.");
-  lines.push("");
 
   // ── birth moment ───────────────────────────────────────────────────────────
   lines.push("## Chart Data");
@@ -64,7 +64,7 @@ export function buildNatalUserPrompt(chartData: ChartData): string {
   lines.push("");
 
   // ── planet positions ──────────────────────────────────────────────────────
-  lines.push("## Planet Positions");
+  lines.push("## Natal Planet Positions");
   lines.push("Body         Sign & Degree        House  Retrograde");
   lines.push("──────────── ──────────────────── ─────  ──────────");
 
@@ -89,8 +89,8 @@ export function buildNatalUserPrompt(chartData: ChartData): string {
   }
   lines.push("");
 
-  // ── aspects ───────────────────────────────────────────────────────────────
-  lines.push("## Aspects");
+  // ── natal aspects ─────────────────────────────────────────────────────────
+  lines.push("## Natal Aspects");
 
   if (chartData.aspects.length === 0) {
     lines.push("(No major aspects within the configured orbs)");
@@ -104,9 +104,102 @@ export function buildNatalUserPrompt(chartData: ChartData): string {
       lines.push(`${b1} ${type} ${b2} ${a.orb.toFixed(2)}°`);
     }
   }
+
+  return lines;
+}
+
+export function buildNatalUserPrompt(chartData: ChartData): string {
+  const lines: string[] = [];
+
+  lines.push("Please interpret this natal chart. All positions below are computed values.");
+  lines.push("");
+  lines.push(...formatNatalFacts(chartData));
+  lines.push("");
+  lines.push("Interpret this chart now. Remember: only reference positions listed above.");
+
+  return lines.join("\n");
+}
+
+// ─── transit prompts ──────────────────────────────────────────────────────────
+
+export function buildTransitSystemPrompt(): string {
+  return `You are a skilled astrologer who interprets planetary transits against a natal chart.
+
+Your role is to write clear, insightful interpretations of the transit data you are given, and to
+answer follow-up questions about it in an ongoing conversation.
+
+STRICT CONSTRAINTS — follow these without exception:
+1. You INTERPRET ONLY. All natal positions, transiting positions, degrees, signs, houses, and
+   aspects are supplied to you. Never compute, invent, correct, or "fill in" any placement, degree,
+   or aspect. Treat the supplied data as the only ground truth. If something is absent from the
+   data, say so rather than guessing.
+2. Name only the signs, degrees, houses, and aspects that appear explicitly in the data. Do not
+   name any placement or aspect that is not listed — even if you believe it should be there.
+3. Always distinguish transiting placements from natal placements explicitly (e.g. "transiting
+   Saturn" vs. "your natal Moon"). Never blur the two into one undifferentiated placement.
+4. The chart and transit facts are given fresh in every call, including every turn of a
+   conversation. You have no memory of prior charts or transits beyond what is supplied.
+
+INTERPRETATION GUIDANCE:
+- For the OPENING interpretation (no prior conversation), write 3–5 flowing paragraphs: the
+  overall theme of the current transiting pattern, the tightest and most significant
+  transit-to-natal aspects first, which natal houses are being activated, and what areas of life
+  this suggests focus on right now.
+- For FOLLOW-UP questions, answer the specific question directly and concisely — a few paragraphs
+  at most — grounded in the same facts, naming exact placements, houses, and aspect orbs from the
+  data where relevant. Do not repeat the full opening reading.
+- Write for an engaged, curious general reader — no jargon without brief explanation.
+- Do not list raw data back; synthesize it into meaning.`.trimStart();
+}
+
+function formatTransitFacts(transit: TransitData): string[] {
+  const lines: string[] = [];
+
+  lines.push("## Transit Date");
+  lines.push(`Transit instant (UTC, noon) : ${transit.transitInstant}`);
+  lines.push(`Ephemeris                   : ${transit.meta.ephemeris}`);
   lines.push("");
 
-  lines.push("Interpret this chart now. Remember: only reference positions listed above.");
+  lines.push("## Transiting Planet Positions");
+  lines.push("Body         Sign & Degree        Natal House  Retrograde");
+  lines.push("──────────── ──────────────────── ────────────  ──────────");
+  for (const p of transit.transitingPositions) {
+    const body  = p.body.padEnd(12);
+    const place = `${fmtDeg(p.signDegree)} ${p.sign}`.padEnd(20);
+    const house = String(p.house).padEnd(12);
+    const retro = p.retrograde ? "R" : "-";
+    lines.push(`${body} ${place} ${house}  ${retro}`);
+  }
+  lines.push("");
+
+  lines.push("## Transit → Natal Aspects");
+  lines.push("(body1 = transiting planet, body2 = natal point)");
+  if (transit.transitToNatalAspects.length === 0) {
+    lines.push("(No transit-to-natal aspects within the configured orbs)");
+  } else {
+    lines.push("Transiting   Aspect       Natal        Orb");
+    lines.push("──────────── ──────────── ──────────── ─────");
+    for (const a of transit.transitToNatalAspects) {
+      const b1   = a.body1.padEnd(12);
+      const type = a.type.padEnd(12);
+      const b2   = a.body2.padEnd(12);
+      lines.push(`${b1} ${type} ${b2} ${a.orb.toFixed(2)}°`);
+    }
+  }
+
+  return lines;
+}
+
+// Serializes BOTH the natal chart and the transit data as explicit facts —
+// the natal side reuses the same fact block as the single-shot natal prompt.
+export function buildTransitContext(natal: ChartData, transit: TransitData): string {
+  const lines: string[] = [];
+
+  lines.push("The following facts are computed values. Treat them as ground truth.");
+  lines.push("");
+  lines.push(...formatNatalFacts(natal));
+  lines.push("");
+  lines.push(...formatTransitFacts(transit));
 
   return lines.join("\n");
 }
