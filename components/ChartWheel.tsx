@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef } from "react";
 import type { ChartData } from "@/lib/ephemeris";
-import { toAstroChartData } from "@/lib/chartAdapter";
+import { toAstroChartData, toAstroChartAspects } from "@/lib/chartAdapter";
 import styles from "./ChartWheel.module.css";
 
 interface Props {
@@ -34,7 +34,10 @@ export function ChartWheel({ chart }: Props) {
       container.innerHTML = "";
 
       const astroChart = new Chart(elementId, SIZE, SIZE);
-      astroChart.radix(toAstroChartData(chart));
+      const radix = astroChart.radix(toAstroChartData(chart));
+      // Pass OUR computed aspects (chart.aspects) so the library draws exactly
+      // those lines instead of recomputing aspects with its own default orbs.
+      radix.aspects(toAstroChartAspects(chart));
 
       // The library sets fixed pixel width/height; let it scale down on
       // narrower screens via the viewBox it already sets.
