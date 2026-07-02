@@ -75,6 +75,12 @@ function toRecord(row: {
 
 // ─── public API ───────────────────────────────────────────────────────────────
 
+// targetDate is a resolved calendar date, not a UI concept — today it always
+// comes from a manually-picked date, but nothing here assumes that. A future
+// named-event picker (full moon, a conjunction, etc.) just needs to resolve
+// its own selection down to a "YYYY-MM-DD" date string upstream; from here
+// down (this function, getOrCreateTransitChart, the API route) the path is
+// unchanged, since a date is the only thing this layer ever needed.
 export function computeTransitData(input: {
   natal: ChartData;
   targetDate: string;
@@ -143,6 +149,9 @@ export async function getTransitChartById(id: string): Promise<TransitChartRecor
   return row ? toRecord(row) : null;
 }
 
+// targetDate: see the note on computeTransitData — any future way of
+// picking "when" (a named event, not just a calendar widget) resolves to
+// this same date string before it ever reaches here.
 export async function getOrCreateTransitChart(
   chartId: string,
   targetDate: string
