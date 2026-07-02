@@ -1,7 +1,8 @@
 import * as swe from "sweph";
+import { computeAspects, type Aspect, type AspectOrbConfig } from "./aspects";
 
 // ─── aspect configuration ────────────────────────────────────────────────────
-const ASPECT_CONFIG: ReadonlyArray<{ type: string; angle: number; orb: number }> = [
+const NATAL_ORBS: readonly AspectOrbConfig[] = [
   { type: "conjunction", angle: 0,   orb: 8 },
   { type: "sextile",     angle: 60,  orb: 4 },
   { type: "square",      angle: 90,  orb: 6 },
@@ -14,7 +15,13 @@ const SIGNS = [
   "Libra", "Scorpio", "Sagittarius", "Capricorn", "Aquarius", "Pisces",
 ] as const;
 
-const PLANET_BODIES: Array<{ id: number; name: string; optional?: true }> = [
+// Moshier flag — no ephemeris files required. To switch to high-precision
+// Swiss files: download sepl_18/semo_18/seas_18.se1, call swe.set_ephe_path(dir),
+// and replace SEFLG_MOSEPH with SEFLG_SWIEPH here (and update EPHEMERIS_MODE).
+export const CALC_FLAGS = swe.constants.SEFLG_MOSEPH | swe.constants.SEFLG_SPEED;
+export const EPHEMERIS_MODE: "swieph" | "moseph" = "moseph";
+
+export const PLANET_BODIES: Array<{ id: number; name: string; optional?: true }> = [
   { id: swe.constants.SE_SUN,       name: "Sun"       },
   { id: swe.constants.SE_MOON,      name: "Moon"      },
   { id: swe.constants.SE_MERCURY,   name: "Mercury"   },
@@ -47,12 +54,7 @@ export interface HouseCusp {
   signDegree: number;
 }
 
-export interface Aspect {
-  body1: string;
-  body2: string;
-  type: string;
-  orb: number;
-}
+export type { Aspect };
 
 export interface ChartData {
   positions: PlanetPosition[];
@@ -71,14 +73,14 @@ export interface ChartData {
 
 // ─── internal helpers ─────────────────────────────────────────────────────────
 
-function lonToSignInfo(lon: number): { sign: string; signDegree: number } {
+export function lonToSignInfo(lon: number): { sign: string; signDegree: number } {
   return {
     sign: SIGNS[Math.floor(lon / 30)],
     signDegree: lon % 30,
   };
 }
 
-function assignHouse(lon: number, cusps: number[]): number {
+export function assignHouse(lon: number, cusps: number[]): number {
   for (let h = 0; h < 12; h++) {
     const cusp     = cusps[h];
     const nextCusp = cusps[(h + 1) % 12];
@@ -91,33 +93,6 @@ function assignHouse(lon: number, cusps: number[]): number {
     }
   }
   return 1;
-}
-
-function angularSep(a: number, b: number): number {
-  const diff = Math.abs(a - b) % 360;
-  return diff > 180 ? 360 - diff : diff;
-}
-
-function buildAspects(positions: PlanetPosition[]): Aspect[] {
-  const aspects: Aspect[] = [];
-  for (let i = 0; i < positions.length; i++) {
-    for (let j = i + 1; j < positions.length; j++) {
-      const sep = angularSep(positions[i].longitude, positions[j].longitude);
-      for (const { type, angle, orb } of ASPECT_CONFIG) {
-        const actualOrb = Math.abs(sep - angle);
-        if (actualOrb <= orb) {
-          aspects.push({
-            body1: positions[i].body,
-            body2: positions[j].body,
-            type,
-            orb: Math.round(actualOrb * 100) / 100,
-          });
-          break; // aspect orb ranges don't overlap, so at most one match per pair
-        }
-      }
-    }
-  }
-  return aspects;
 }
 
 // ─── public API ───────────────────────────────────────────────────────────────
@@ -145,16 +120,11 @@ export function computeNatalChart(input: {
   }
   const [, jd_ut] = jdRes.data; // calc_ut and houses_ex both take UT Julian Day
 
-  // Moshier flag — no ephemeris files required; noted in meta.ephemeris
-  // To switch to high-precision Swiss files: download sepl_18/semo_18/seas_18.se1,
-  // call swe.set_ephe_path(dir), and replace SEFLG_MOSEPH with SEFLG_SWIEPH below.
-  const flags = swe.constants.SEFLG_MOSEPH | swe.constants.SEFLG_SPEED;
-
   // ── planet positions ────────────────────────────────────────────────────────
   const positions: PlanetPosition[] = [];
 
   for (const planet of PLANET_BODIES) {
-    const res = swe.calc_ut(jd_ut, planet.id, flags);
+    const res = swe.calc_ut(jd_ut, planet.id, CALC_FLAGS);
     if (res.flag < 0) {
       if (planet.optional) continue; // Chiron requires swieph file; skip gracefully
       throw new Error(`calc_ut failed for ${planet.name}: ${res.error}`);
@@ -200,13 +170,13 @@ export function computeNatalChart(input: {
     houses,
     ascendant,
     midheaven,
-    aspects: buildAspects(positions),
+    aspects: computeAspects(positions, positions, NATAL_ORBS),
     meta: {
       utcDateTime,
       latitude,
       longitude,
       houseSystem,
-      ephemeris: "moseph",
+      ephemeris: EPHEMERIS_MODE,
     },
   };
 }

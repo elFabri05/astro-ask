@@ -23,6 +23,7 @@ model BirthChart {
   chartData       String           // JSON.stringify(ChartData), frozen at write time
   createdAt       DateTime         @default(now())
   interpretations Interpretation[]
+  transitCharts   TransitChart[]
 }
 
 model Interpretation {
@@ -33,4 +34,15 @@ model Interpretation {
   model     String     // which model produced it
   createdAt DateTime   @default(now())
   chart     BirthChart @relation(fields: [chartId], references: [id])
+}
+
+model TransitChart {
+  id          String     @id @default(cuid())
+  chartId     String
+  targetDate  String     // "YYYY-MM-DD"
+  transitData String     // JSON.stringify(TransitData), frozen
+  createdAt   DateTime   @default(now())
+  chart       BirthChart @relation(fields: [chartId], references: [id])
+
+  @@unique([chartId, targetDate])
 }
