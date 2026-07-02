@@ -10,7 +10,7 @@ const nextConfig = {
       "@prisma/client",
       "prisma",
       "ai",
-      "@ai-sdk/anthropic",
+      "@ai-sdk/google",
     ],
   },
 };

@@ -1,5 +1,5 @@
 import { generateText } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
+import { google } from "@ai-sdk/google";
 import { prisma } from "./db";
 import { getBirthChart } from "./charts";
 import { buildNatalSystemPrompt, buildNatalUserPrompt } from "./prompts";
@@ -7,9 +7,9 @@ import { buildNatalSystemPrompt, buildNatalUserPrompt } from "./prompts";
 // ─── config ───────────────────────────────────────────────────────────────────
 
 // Put the model id in one place so it is trivially swappable.
-// Override at runtime via ANTHROPIC_MODEL env var.
+// Override at runtime via GOOGLE_MODEL env var.
 const MODEL_ID =
-  (process.env.ANTHROPIC_MODEL as string | undefined) ?? "claude-haiku-4-5-20251001";
+  (process.env.GOOGLE_MODEL as string | undefined) ?? "gemini-3.5-flash";
 
 // ─── return type ─────────────────────────────────────────────────────────────
 
@@ -51,7 +51,7 @@ export async function generateNatalInterpretation(
   const prompt = buildNatalUserPrompt(chart.chartData);
 
   const { text } = await generateText({
-    model:  anthropic(MODEL_ID as Parameters<typeof anthropic>[0]),
+    model:  google(MODEL_ID),
     system,
     prompt,
   });
