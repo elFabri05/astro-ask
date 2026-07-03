@@ -40,16 +40,22 @@ model Interpretation {
 }
 
 model TransitChart {
-  id              String           @id @default(cuid())
-  chartId         String
-  targetDate      String           // "YYYY-MM-DD"
-  transitData     String           // JSON.stringify(TransitData), frozen
-  createdAt       DateTime         @default(now())
-  chart           BirthChart       @relation(fields: [chartId], references: [id], onDelete: Cascade)
-  interpretations Interpretation[]
-  sessions        Session[]
+  id                String           @id @default(cuid())
+  chartId           String
+  transitInstantUtc String           // ISO 8601 UTC, the actual instant used for the ephemeris calc
+  latitude          Float            // location used for the calc (override place, or natal as default)
+  longitude         Float
+  targetDate        String           // "YYYY-MM-DD", human-facing calendar date
+  localTime         String?          // "HH:mm", human-facing; null when defaulted to noon
+  timezone          String?          // IANA zone the local time was resolved in; null when defaulted
+  placeLabel        String?          // human label of an overridden place; null when using natal location
+  transitData       String           // JSON.stringify(TransitData), frozen
+  createdAt         DateTime         @default(now())
+  chart             BirthChart       @relation(fields: [chartId], references: [id], onDelete: Cascade)
+  interpretations   Interpretation[]
+  sessions          Session[]
 
-  @@unique([chartId, targetDate])
+  @@unique([chartId, transitInstantUtc, latitude, longitude])
 }
 
 model Session {

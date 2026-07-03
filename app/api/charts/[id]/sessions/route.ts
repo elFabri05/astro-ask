@@ -1,14 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSession, listSessions, ChartNotFoundError } from "@/lib/sessions";
-import { findTransitChart } from "@/lib/transits";
+import { TransitTargetInput } from "@/lib/validation";
 
 type Ctx = { params: { id: string } };
 
 export async function POST(req: NextRequest, { params }: Ctx) {
-  const body = await req.json().catch(() => ({})) as { targetDate?: string };
+  const body = await req.json().catch(() => ({})) as {
+    targetDate?: string;
+    localTime?: string;
+    place?: { label: string; latitude: number; longitude: number };
+  };
+
+  if (body.targetDate !== undefined || body.localTime !== undefined || body.place !== undefined) {
+    const parsed = TransitTargetInput.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error.flatten().fieldErrors }, { status: 400 });
+    }
+  }
 
   try {
-    const session = await createSession({ chartId: params.id, targetDate: body.targetDate });
+    const session = await createSession({
+      chartId: params.id,
+      targetDate: body.targetDate,
+      localTime:  body.localTime,
+      place:      body.place,
+    });
     return NextResponse.json(session, { status: 201 });
   } catch (err) {
     if (err instanceof ChartNotFoundError) {
@@ -19,18 +35,13 @@ export async function POST(req: NextRequest, { params }: Ctx) {
   }
 }
 
+// Lists sessions for a specific, already-resolved TransitChart (the client
+// resolves date+time+place to a transitChartId via /api/charts/:id/transits
+// first). Omitting transitChartId lists the natal session.
 export async function GET(req: NextRequest, { params }: Ctx) {
-  const date = req.nextUrl.searchParams.get("date");
+  const transitChartId = req.nextUrl.searchParams.get("transitChartId");
 
   try {
-    // Read-only: a date with no computed TransitChart yet has no sessions.
-    let transitChartId: string | null = null;
-    if (date) {
-      const transitChart = await findTransitChart(params.id, date);
-      if (!transitChart) return NextResponse.json([]);
-      transitChartId = transitChart.id;
-    }
-
     const sessions = await listSessions(params.id, transitChartId);
     return NextResponse.json(sessions);
   } catch (err) {

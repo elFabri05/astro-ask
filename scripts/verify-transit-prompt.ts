@@ -16,6 +16,7 @@ const natal = computeNatalChart({
 const transit = computeTransitData({
   natal,
   targetDate: "2025-01-15",
+  transitInstantUtc: "2025-01-15T12:00:00Z",
 });
 
 console.log("─".repeat(60));

@@ -6,6 +6,7 @@ import {
 } from "./transits";
 import { getNatalInterpretation, generateNatalInterpretation, getOrCreateTransitOpener } from "./interpret";
 import type { ChartData } from "./ephemeris";
+import type { ResolvedPlace } from "./geo";
 
 export { ChartNotFoundError };
 export class SessionNotFoundError extends Error {}
@@ -62,8 +63,10 @@ export function deriveTitle(text: string): string {
 export async function createSession(input: {
   chartId: string;
   targetDate?: string;
+  localTime?: string;
+  place?: ResolvedPlace;
 }): Promise<SessionWithMessages> {
-  const { chartId, targetDate } = input;
+  const { chartId, targetDate, localTime, place } = input;
 
   const chart = await getBirthChart(chartId);
   if (!chart) throw new ChartNotFoundError(`Chart not found: ${chartId}`);
@@ -72,7 +75,7 @@ export async function createSession(input: {
   let openerText: string;
 
   if (targetDate) {
-    const transitChart = await getOrCreateTransitChart(chartId, targetDate);
+    const transitChart = await getOrCreateTransitChart(chartId, { targetDate, localTime, place });
     transitChartId = transitChart.id;
     openerText = (await getOrCreateTransitOpener(chartId, transitChart.id)).content;
   } else {

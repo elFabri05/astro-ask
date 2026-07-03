@@ -156,7 +156,7 @@ function formatTransitFacts(transit: TransitData): string[] {
   const lines: string[] = [];
 
   lines.push("## Transit Date");
-  lines.push(`Transit instant (UTC, noon) : ${transit.transitInstant}`);
+  lines.push(`Transit instant (UTC)       : ${transit.transitInstant}`);
   lines.push(`Ephemeris                   : ${transit.meta.ephemeris}`);
   lines.push("");
 

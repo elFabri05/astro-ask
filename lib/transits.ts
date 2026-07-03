@@ -10,6 +10,7 @@ import {
 } from "./ephemeris";
 import { computeAspects, type Aspect, type AspectBody, type AspectOrbConfig } from "./aspects";
 import { getBirthChart } from "./charts";
+import { resolveUtcInstant, type ResolvedPlace } from "./geo";
 import { prisma } from "./db";
 import { Prisma } from "@prisma/client";
 
@@ -35,11 +36,36 @@ export interface TransitData {
 }
 
 export interface TransitChartRecord {
-  id:          string;
-  chartId:     string;
-  targetDate:  string;
-  transitData: TransitData; // parsed; never re-computed on read
-  createdAt:   Date;
+  id:                string;
+  chartId:           string;
+  transitInstantUtc: string;         // ISO UTC, the actual instant the ephemeris was computed at
+  latitude:          number;         // location used for the calc (override place, or natal default)
+  longitude:         number;
+  targetDate:        string;         // "YYYY-MM-DD", human-facing calendar date
+  localTime:         string | null;  // "HH:mm", human-facing; null when defaulted to noon
+  timezone:          string | null;  // IANA zone the local time was resolved in; null when defaulted
+  placeLabel:        string | null;  // human label of an overridden place; null when using natal location
+  transitData:       TransitData;    // parsed; never re-computed on read
+  createdAt:         Date;
+}
+
+// What the caller asked for: a date is required, time and a place override
+// are independently optional. Omitting both must resolve identically to the
+// historical noon-UTC-at-natal-location behavior — see resolveTransitTarget.
+export interface TransitTargetInput {
+  targetDate: string;
+  localTime?: string;
+  place?: ResolvedPlace;
+}
+
+interface ResolvedTransitTarget {
+  transitInstantUtc: string;
+  latitude:          number;
+  longitude:         number;
+  targetDate:        string;
+  localTime:         string | null;
+  timezone:          string | null;
+  placeLabel:        string | null;
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -67,27 +93,92 @@ function parseTransitData(raw: string): TransitData {
 }
 
 function toRecord(row: {
-  id: string; chartId: string; targetDate: string;
+  id: string; chartId: string; transitInstantUtc: string; latitude: number; longitude: number;
+  targetDate: string; localTime: string | null; timezone: string | null; placeLabel: string | null;
   transitData: string; createdAt: Date;
 }): TransitChartRecord {
   return { ...row, transitData: parseTransitData(row.transitData) };
 }
 
+// Resolves a (date, time?, place?) input down to the exact instant + location
+// used for the ephemeris calc, before any cache lookup — the resolved key is
+// what determines cache identity, not the raw input. Throws ChartNotFoundError
+// if chartId doesn't exist, since the natal location is the fallback for any
+// omitted piece.
+//
+// Omitting both time and place bypasses resolveUtcInstant entirely (no geo-tz
+// lookup) so it reproduces the historical `${targetDate}T12:00:00Z` behavior
+// byte-for-byte.
+async function resolveTransitTarget(
+  chartId: string,
+  target: TransitTargetInput
+): Promise<ResolvedTransitTarget> {
+  const chart = await getBirthChart(chartId);
+  if (!chart) throw new ChartNotFoundError(`Chart not found: ${chartId}`);
+
+  const { targetDate, localTime, place } = target;
+
+  if (place) {
+    const { utcDateTime, timezone } = resolveUtcInstant({
+      localDate: targetDate,
+      localTime: localTime ?? "12:00",
+      latitude:  place.latitude,
+      longitude: place.longitude,
+    });
+    return {
+      transitInstantUtc: utcDateTime,
+      latitude:  place.latitude,
+      longitude: place.longitude,
+      targetDate,
+      localTime: localTime ?? null,
+      timezone,
+      placeLabel: place.label,
+    };
+  }
+
+  if (localTime) {
+    const { utcDateTime, timezone } = resolveUtcInstant({
+      localDate: targetDate,
+      localTime,
+      latitude:  chart.latitude,
+      longitude: chart.longitude,
+    });
+    return {
+      transitInstantUtc: utcDateTime,
+      latitude:  chart.latitude,
+      longitude: chart.longitude,
+      targetDate,
+      localTime,
+      timezone,
+      placeLabel: null,
+    };
+  }
+
+  return {
+    transitInstantUtc: `${targetDate}T12:00:00Z`,
+    latitude:  chart.latitude,
+    longitude: chart.longitude,
+    targetDate,
+    localTime: null,
+    timezone: null,
+    placeLabel: null,
+  };
+}
+
 // ─── public API ───────────────────────────────────────────────────────────────
 
-// targetDate is a resolved calendar date, not a UI concept — today it always
-// comes from a manually-picked date, but nothing here assumes that. A future
-// named-event picker (full moon, a conjunction, etc.) just needs to resolve
-// its own selection down to a "YYYY-MM-DD" date string upstream; from here
-// down (this function, getOrCreateTransitChart, the API route) the path is
-// unchanged, since a date is the only thing this layer ever needed.
+// transitInstantUtc is the resolved instant (see resolveTransitTarget) —
+// today it's always noon UTC or a resolved local time, but nothing here
+// assumes that. A future named-event picker (full moon, a conjunction, etc.)
+// just needs to resolve its own selection down to an instant upstream; from
+// here down the path is unchanged.
 export function computeTransitData(input: {
   natal: ChartData;
   targetDate: string;
+  transitInstantUtc: string;
 }): TransitData {
-  const { natal, targetDate } = input;
-  const transitInstant = `${targetDate}T12:00:00Z`;
-  const jd_ut = jdUtFromIso(transitInstant);
+  const { natal, targetDate, transitInstantUtc } = input;
+  const jd_ut = jdUtFromIso(transitInstantUtc);
 
   // natal cusps in house order (index 0 = house 1 cusp, ... index 11 = house 12)
   const natalCusps = [...natal.houses]
@@ -124,7 +215,7 @@ export function computeTransitData(input: {
 
   return {
     targetDate,
-    transitInstant,
+    transitInstant: transitInstantUtc,
     transitingPositions,
     transitToNatalAspects,
     meta: { ephemeris: EPHEMERIS_MODE },
@@ -133,13 +224,23 @@ export function computeTransitData(input: {
 
 // Read-only lookup — never computes. Used both as the cache check inside
 // getOrCreateTransitChart and by callers that must not trigger ephemeris work
-// (e.g. listing sessions for a date that may not have been computed yet).
+// (e.g. listing sessions for a combination that may not have been computed
+// yet). Still resolves the target first (cheap: no ephemeris, at most a
+// geo-tz lookup) since the resolved instant + location is the cache key.
 export async function findTransitChart(
   chartId: string,
-  targetDate: string
+  target: TransitTargetInput
 ): Promise<TransitChartRecord | null> {
+  const resolved = await resolveTransitTarget(chartId, target);
   const row = await prisma.transitChart.findUnique({
-    where: { chartId_targetDate: { chartId, targetDate } },
+    where: {
+      chartId_transitInstantUtc_latitude_longitude: {
+        chartId,
+        transitInstantUtc: resolved.transitInstantUtc,
+        latitude:          resolved.latitude,
+        longitude:         resolved.longitude,
+      },
+    },
   });
   return row ? toRecord(row) : null;
 }
@@ -149,35 +250,46 @@ export async function getTransitChartById(id: string): Promise<TransitChartRecor
   return row ? toRecord(row) : null;
 }
 
-// targetDate: see the note on computeTransitData — any future way of
-// picking "when" (a named event, not just a calendar widget) resolves to
-// this same date string before it ever reaches here.
+// target: see the note on computeTransitData — any future way of picking
+// "when" (a named event, not just a calendar widget) resolves to a
+// TransitTargetInput before it ever reaches here.
 export async function getOrCreateTransitChart(
   chartId: string,
-  targetDate: string
+  target: TransitTargetInput
 ): Promise<TransitChartRecord> {
-  const existing = await findTransitChart(chartId, targetDate);
+  const existing = await findTransitChart(chartId, target);
   if (existing) return existing;
 
   const chart = await getBirthChart(chartId);
   if (!chart) throw new ChartNotFoundError(`Chart not found: ${chartId}`);
 
-  const transitData = computeTransitData({ natal: chart.chartData, targetDate });
+  const resolved = await resolveTransitTarget(chartId, target);
+  const transitData = computeTransitData({
+    natal: chart.chartData,
+    targetDate: resolved.targetDate,
+    transitInstantUtc: resolved.transitInstantUtc,
+  });
 
   try {
     const row = await prisma.transitChart.create({
       data: {
         chartId,
-        targetDate,
-        transitData: JSON.stringify(transitData),
+        transitInstantUtc: resolved.transitInstantUtc,
+        latitude:          resolved.latitude,
+        longitude:         resolved.longitude,
+        targetDate:        resolved.targetDate,
+        localTime:         resolved.localTime,
+        timezone:          resolved.timezone,
+        placeLabel:        resolved.placeLabel,
+        transitData:       JSON.stringify(transitData),
       },
     });
     return toRecord(row);
   } catch (err) {
-    // Race: another call created the same (chartId, targetDate) row first —
-    // the @@unique constraint is the source of truth, so just re-read it.
+    // Race: another call created the same resolved row first — the
+    // @@unique constraint is the source of truth, so just re-read it.
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
-      const row = await findTransitChart(chartId, targetDate);
+      const row = await findTransitChart(chartId, target);
       if (row) return row;
     }
     throw err;
