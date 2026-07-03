@@ -31,6 +31,7 @@ export interface TransitData {
   targetDate: string;
   transitInstant: string;              // ISO UTC noon
   transitingPositions: PlanetPosition[]; // `house` = natal house occupied
+  transitToTransitAspects: Aspect[];   // the sky's own configuration — both bodies transiting
   transitToNatalAspects: Aspect[];     // body1 = transiting, body2 = natal
   meta: { ephemeris: "swieph" | "moseph" };
 }
@@ -88,8 +89,18 @@ function jdUtFromIso(isoUtc: string): number {
   return jd_ut;
 }
 
+// Old cached rows (written before transit-to-transit aspects were tracked)
+// lack transitToTransitAspects. It's derivable from transitingPositions
+// alone (no natal chart or ephemeris call needed), so backfill it in memory
+// on read rather than forcing a data migration or a cache reset.
 function parseTransitData(raw: string): TransitData {
-  return JSON.parse(raw) as TransitData;
+  const data = JSON.parse(raw) as TransitData;
+  if (!data.transitToTransitAspects) {
+    data.transitToTransitAspects = computeAspects(
+      data.transitingPositions, data.transitingPositions, TRANSIT_ORBS
+    );
+  }
+  return data;
 }
 
 function toRecord(row: {
@@ -204,6 +215,11 @@ export function computeTransitData(input: {
     });
   }
 
+  // The sky's own configuration — transiting planets aspecting each other,
+  // independent of any individual chart. Same self-set dedup as the natal
+  // chart's internal aspects (skip self-pairs and A–B/B–A duplicates).
+  const transitToTransitAspects = computeAspects(transitingPositions, transitingPositions, TRANSIT_ORBS);
+
   // Aspect targets: natal planets plus the natal angles.
   const natalTargets: AspectBody[] = [
     ...natal.positions.map(p => ({ body: p.body, longitude: p.longitude })),
@@ -217,6 +233,7 @@ export function computeTransitData(input: {
     targetDate,
     transitInstant: transitInstantUtc,
     transitingPositions,
+    transitToTransitAspects,
     transitToNatalAspects,
     meta: { ephemeris: EPHEMERIS_MODE },
   };

@@ -34,7 +34,13 @@ console.log(context);
 
 const natalSun = natal.positions.find(p => p.body === "Sun")!;
 const transitSaturn = transit.transitingPositions.find(p => p.body === "Saturn")!;
-const firstAspect = transit.transitToNatalAspects[0];
+const firstNatalAspect = transit.transitToNatalAspects[0];
+const firstSkyAspect = transit.transitToTransitAspects[0];
+
+const sectionAIndex = context.indexOf("## A. The Sky Right Now");
+const sectionBIndex = context.indexOf("## B. How It Lands On This Person");
+
+const systemPrompt = buildTransitSystemPrompt();
 
 const checks: Array<[string, boolean]> = [
   [
@@ -50,10 +56,36 @@ const checks: Array<[string, boolean]> = [
     context.includes("Transit → Natal Aspects"),
   ],
   [
-    firstAspect
-      ? `First transit-to-natal aspect present (${firstAspect.body1} ${firstAspect.type} ${firstAspect.body2})`
+    "Transit → Transit Aspects section present",
+    context.includes("Transit → Transit Aspects"),
+  ],
+  [
+    "Section A (sky) appears before Section B (personal) — interpretation order",
+    sectionAIndex !== -1 && sectionBIndex !== -1 && sectionAIndex < sectionBIndex,
+  ],
+  [
+    firstNatalAspect
+      ? `First transit-to-natal aspect present (${firstNatalAspect.body1} ${firstNatalAspect.type} ${firstNatalAspect.body2})`
       : "No transit-to-natal aspects to check (skipped)",
-    firstAspect ? context.includes(firstAspect.body1) && context.includes(firstAspect.body2) : true,
+    firstNatalAspect
+      ? context.includes(firstNatalAspect.body1) && context.includes(firstNatalAspect.body2)
+      : true,
+  ],
+  [
+    firstSkyAspect
+      ? `First transit-to-transit aspect present (${firstSkyAspect.body1} ${firstSkyAspect.type} ${firstSkyAspect.body2})`
+      : "No transit-to-transit aspects to check (skipped)",
+    firstSkyAspect
+      ? context.includes(firstSkyAspect.body1) && context.includes(firstSkyAspect.body2)
+      : true,
+  ],
+  [
+    "System prompt instructs the two-stage sky-then-natal order",
+    systemPrompt.includes("STAGE 1") && systemPrompt.includes("STAGE 2"),
+  ],
+  [
+    "System prompt no longer tells the model to flag absent data",
+    !systemPrompt.toLowerCase().includes("say so rather than guessing"),
   ],
 ];
 

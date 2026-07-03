@@ -130,21 +130,31 @@ answer follow-up questions about it in an ongoing conversation.
 
 STRICT CONSTRAINTS — follow these without exception:
 1. You INTERPRET ONLY. All natal positions, transiting positions, degrees, signs, houses, and
-   aspects are supplied to you. Never compute, invent, correct, or "fill in" any placement, degree,
-   or aspect. Treat the supplied data as the only ground truth. If something is absent from the
-   data, say so rather than guessing.
+   aspects — including the aspects transiting planets form with EACH OTHER — are supplied to you.
+   Never compute, invent, correct, or "fill in" any placement, degree, or aspect beyond what's
+   listed. Treat the supplied data as the only ground truth.
 2. Name only the signs, degrees, houses, and aspects that appear explicitly in the data. Do not
    name any placement or aspect that is not listed — even if you believe it should be there.
 3. Always distinguish transiting placements from natal placements explicitly (e.g. "transiting
-   Saturn" vs. "your natal Moon"). Never blur the two into one undifferentiated placement.
+   Saturn" vs. "your natal Moon"), and distinguish transit-to-transit aspects (the sky's own
+   configuration) from transit-to-natal aspects (its contact with this person's chart).
 4. The chart and transit facts are given fresh in every call, including every turn of a
    conversation. You have no memory of prior charts or transits beyond what is supplied.
 
-INTERPRETATION GUIDANCE:
-- For the OPENING interpretation (no prior conversation), write 3–5 flowing paragraphs: the
-  overall theme of the current transiting pattern, the tightest and most significant
-  transit-to-natal aspects first, which natal houses are being activated, and what areas of life
-  this suggests focus on right now.
+INTERPRETATION GUIDANCE — read and interpret the data in two stages, in this order:
+- STAGE 1, the sky itself (section A): characterize the overall celestial configuration right now
+  — e.g. a tight square between two transiting planets, a cluster of retrogrades — using the
+  transit-to-transit aspects. This is the shared "weather," true for everyone at this instant,
+  independent of any one chart. Name the specific aspects that make up this theme.
+- STAGE 2, how it lands on this person (section B): ground that sky in the individual using the
+  transit-to-natal aspects and the natal houses being activated. This is what actually matters for
+  relevance — the sky-stage sets the theme, but the natal-stage is what makes it personal, and
+  should carry most of the interpretive weight. If a strong sky configuration doesn't closely
+  aspect the natal chart, say so plainly: lead with the theme, but be clear it's ambient background
+  rather than a strong personal signal, and don't dwell at length on sky patterns that don't
+  contact the chart.
+- For the OPENING interpretation (no prior conversation), write 3–5 flowing paragraphs moving
+  through both stages in order.
 - For FOLLOW-UP questions, answer the specific question directly and concisely — a few paragraphs
   at most — grounded in the same facts, naming exact placements, houses, and aspect orbs from the
   data where relevant. Do not repeat the full opening reading.
@@ -152,15 +162,20 @@ INTERPRETATION GUIDANCE:
 - Do not list raw data back; synthesize it into meaning.`.trimStart();
 }
 
-function formatTransitFacts(transit: TransitData): string[] {
+// Section A — the sky's own configuration: transiting positions and the
+// aspects transiting planets form with EACH OTHER. True for everyone at this
+// instant, independent of any one chart. Interpreted first (see
+// buildTransitSystemPrompt) so the reading opens with the shared "weather"
+// before grounding it in the individual.
+function formatSkyFacts(transit: TransitData): string[] {
   const lines: string[] = [];
 
-  lines.push("## Transit Date");
-  lines.push(`Transit instant (UTC)       : ${transit.transitInstant}`);
-  lines.push(`Ephemeris                   : ${transit.meta.ephemeris}`);
+  lines.push("## A. The Sky Right Now (transit-to-transit)");
+  lines.push(`Transit instant (UTC) : ${transit.transitInstant}`);
+  lines.push(`Ephemeris             : ${transit.meta.ephemeris}`);
   lines.push("");
 
-  lines.push("## Transiting Planet Positions");
+  lines.push("### Transiting Planet Positions");
   lines.push("Body         Sign & Degree        Natal House  Retrograde");
   lines.push("──────────── ──────────────────── ────────────  ──────────");
   for (const p of transit.transitingPositions) {
@@ -172,7 +187,35 @@ function formatTransitFacts(transit: TransitData): string[] {
   }
   lines.push("");
 
-  lines.push("## Transit → Natal Aspects");
+  lines.push("### Transit → Transit Aspects (among the transiting planets themselves)");
+  if (transit.transitToTransitAspects.length === 0) {
+    lines.push("(No transit-to-transit aspects within the configured orbs)");
+  } else {
+    lines.push("Transiting   Aspect       Transiting   Orb");
+    lines.push("──────────── ──────────── ──────────── ─────");
+    for (const a of transit.transitToTransitAspects) {
+      const b1   = a.body1.padEnd(12);
+      const type = a.type.padEnd(12);
+      const b2   = a.body2.padEnd(12);
+      lines.push(`${b1} ${type} ${b2} ${a.orb.toFixed(2)}°`);
+    }
+  }
+
+  return lines;
+}
+
+// Section B — how the sky lands on this individual: the natal chart (reusing
+// the same fact block as the single-shot natal prompt) plus the aspects
+// transiting planets form with natal points.
+function formatPersonalFacts(natal: ChartData, transit: TransitData): string[] {
+  const lines: string[] = [];
+
+  lines.push("## B. How It Lands On This Person (transit-to-natal)");
+  lines.push("");
+  lines.push(...formatNatalFacts(natal));
+  lines.push("");
+
+  lines.push("### Transit → Natal Aspects");
   lines.push("(body1 = transiting planet, body2 = natal point)");
   if (transit.transitToNatalAspects.length === 0) {
     lines.push("(No transit-to-natal aspects within the configured orbs)");
@@ -190,16 +233,20 @@ function formatTransitFacts(transit: TransitData): string[] {
   return lines;
 }
 
-// Serializes BOTH the natal chart and the transit data as explicit facts —
-// the natal side reuses the same fact block as the single-shot natal prompt.
+// Presents facts in interpretation order: the sky's own configuration first
+// (section A), then how it contacts this individual's natal chart
+// (section B) — see buildTransitSystemPrompt for the matching two-stage
+// interpretation guidance.
 export function buildTransitContext(natal: ChartData, transit: TransitData): string {
   const lines: string[] = [];
 
   lines.push("The following facts are computed values. Treat them as ground truth.");
+  lines.push("Read in order: section A is the sky's own configuration, true for everyone right");
+  lines.push("now; section B is how that configuration contacts this individual's natal chart.");
   lines.push("");
-  lines.push(...formatNatalFacts(natal));
+  lines.push(...formatSkyFacts(transit));
   lines.push("");
-  lines.push(...formatTransitFacts(transit));
+  lines.push(...formatPersonalFacts(natal, transit));
 
   return lines.join("\n");
 }

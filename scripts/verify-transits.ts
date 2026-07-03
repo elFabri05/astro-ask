@@ -10,6 +10,37 @@ function fmt(lon: number): string {
   return `${(lon % 30).toFixed(2)}° ${SIGNS[Math.floor(lon / 30)]}`;
 }
 
+// Independent re-derivation of transit-to-transit aspects — deliberately not
+// using lib/aspects.ts's computeAspects, so this is a genuine cross-check
+// rather than the same code confirming itself.
+const INDEPENDENT_ORBS: [string, number, number][] = [
+  ["conjunction", 0, 3], ["opposition", 180, 3], ["square", 90, 3],
+  ["trine", 120, 3], ["sextile", 60, 2],
+];
+
+function independentSeparation(a: number, b: number): number {
+  const diff = Math.abs(a - b) % 360;
+  return diff > 180 ? 360 - diff : diff;
+}
+
+function independentTransitToTransitPairs(
+  positions: { body: string; longitude: number }[]
+): Set<string> {
+  const found = new Set<string>();
+  for (let i = 0; i < positions.length; i++) {
+    for (let j = i + 1; j < positions.length; j++) {
+      const sep = independentSeparation(positions[i].longitude, positions[j].longitude);
+      for (const [type, angle, orb] of INDEPENDENT_ORBS) {
+        if (Math.abs(sep - angle) <= orb) {
+          found.add(`${positions[i].body}|${type}|${positions[j].body}`);
+          break;
+        }
+      }
+    }
+  }
+  return found;
+}
+
 async function main() {
   console.log("─".repeat(60));
   console.log("  Step 1 — natal chart (London Reference)");
@@ -48,6 +79,19 @@ async function main() {
   for (const a of t1.transitData.transitToNatalAspects) {
     console.log(`    ${a.body1.padEnd(10)} ${a.type.padEnd(11)} ${a.body2.padEnd(10)}  orb ${a.orb.toFixed(2)}°`);
   }
+
+  console.log(`\n  Transit → Transit aspects (${t1.transitData.transitToTransitAspects.length}):`);
+  for (const a of t1.transitData.transitToTransitAspects) {
+    console.log(`    ${a.body1.padEnd(10)} ${a.type.padEnd(11)} ${a.body2.padEnd(10)}  orb ${a.orb.toFixed(2)}°`);
+  }
+
+  const computedPairs = new Set(
+    t1.transitData.transitToTransitAspects.map(a => `${a.body1}|${a.type}|${a.body2}`)
+  );
+  const independentPairs = independentTransitToTransitPairs(t1.transitData.transitingPositions);
+  const transitToTransitMatchesIndependentCheck =
+    computedPairs.size === independentPairs.size &&
+    [...computedPairs].every(p => independentPairs.has(p));
 
   const defaultInstantOk = t1.transitInstantUtc === `${targetDate}T12:00:00Z`;
   const defaultLocationOk = t1.latitude === natal.latitude && t1.longitude === natal.longitude;
@@ -111,10 +155,12 @@ async function main() {
   console.log(`  Time+place override is a distinct TransitChart       : ${distinctFromDefault ? "PASS ✓" : "FAIL ✗"}`);
   console.log(`  Time+place override shifts the transiting Moon       : ${moonMoved ? "PASS ✓" : "FAIL ✗"}`);
   console.log(`  Revisiting the same override reuses the same chart   : ${overrideCacheHit ? "PASS ✓" : "FAIL ✗"}`);
+  console.log(`  transitToTransitAspects matches independent check    : ${transitToTransitMatchesIndependentCheck ? "PASS ✓" : "FAIL ✗"}`);
   console.log("─".repeat(60));
 
   if (!cacheHit || !sunOk || !defaultInstantOk || !defaultLocationOk ||
-      !distinctFromDefault || !moonMoved || !overrideCacheHit) {
+      !distinctFromDefault || !moonMoved || !overrideCacheHit ||
+      !transitToTransitMatchesIndependentCheck) {
     process.exit(1);
   }
 }
