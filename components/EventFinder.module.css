@@ -138,6 +138,20 @@
   font-size: 0.875rem;
 }
 
+/* Dev-only server stack trace (see lib/apiErrors.ts) */
+.errorStack {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+
 .scanning {
   padding: 2rem 1rem;
   text-align: center;

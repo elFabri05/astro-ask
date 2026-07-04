@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { internalErrorResponse } from "@/lib/apiErrors";
 import { streamText } from "ai";
 import { google } from "@ai-sdk/google";
 import { MODEL_ID } from "@/lib/interpret";
@@ -38,7 +39,6 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     });
     return result.toTextStreamResponse();
   } catch (err) {
-    console.error("[POST /api/charts/:id/events/interpret]", err);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return internalErrorResponse("[POST /api/charts/:id/events/interpret]", err);
   }
 }

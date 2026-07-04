@@ -59,10 +59,22 @@ export function EventFinder({ chartId }: Props) {
   const [result, setResult] = useState<EventsFindResult | null>(null);
   const [reading, setReading] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; stack?: string } | null>(null);
 
   // Guards against a stale stream writing into a newer search's reading.
   const searchSeq = useRef(0);
+
+  // In development the API returns the real failure (message + stack, see
+  // lib/apiErrors.ts) — pull it out so it lands in the browser, not just the
+  // server terminal. Never collapse it back into a generic string.
+  async function errorFromResponse(res: Response): Promise<{ message: string; stack?: string }> {
+    const body = await res.json().catch(() => null) as
+      { error?: unknown; stack?: unknown } | null;
+    return {
+      message: typeof body?.error === "string" ? body.error : `HTTP ${res.status}`,
+      stack:   typeof body?.stack === "string" ? body.stack : undefined,
+    };
+  }
 
   async function streamInterpretation(found: EventsFindResult, seq: number) {
     setStreaming(true);
@@ -77,7 +89,13 @@ export function EventFinder({ chartId }: Props) {
           events:       found.events,
         }),
       });
-      if (!res.ok || !res.body) throw new Error(`interpretation failed (${res.status})`);
+      if (!res.ok || !res.body) {
+        const detail = await errorFromResponse(res);
+        if (searchSeq.current === seq) {
+          setError({ message: `The reading could not be generated: ${detail.message}`, stack: detail.stack });
+        }
+        return;
+      }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -88,9 +106,10 @@ export function EventFinder({ chartId }: Props) {
         const chunk = decoder.decode(value, { stream: true });
         setReading(prev => prev + chunk);
       }
-    } catch {
+    } catch (err) {
       if (searchSeq.current === seq) {
-        setError("The reading could not be generated. The events above are still valid.");
+        const message = err instanceof Error ? err.message : String(err);
+        setError({ message: `The reading could not be generated: ${message}` });
       }
     } finally {
       if (searchSeq.current === seq) setStreaming(false);
@@ -114,16 +133,24 @@ export function EventFinder({ chartId }: Props) {
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({ window, topic: trimmed }),
       });
-      if (!res.ok) throw new Error(`scan failed (${res.status})`);
+      if (!res.ok) {
+        const detail = await errorFromResponse(res);
+        if (searchSeq.current === seq) {
+          setError({ message: `The scan failed: ${detail.message}`, stack: detail.stack });
+          setScanning(false);
+        }
+        return;
+      }
       const found: EventsFindResult = await res.json();
       if (searchSeq.current !== seq) return;
 
       setResult(found);
       setScanning(false);
       if (found.events.length > 0) void streamInterpretation(found, seq);
-    } catch {
+    } catch (err) {
       if (searchSeq.current === seq) {
-        setError("The scan failed. Please try again.");
+        const message = err instanceof Error ? err.message : String(err);
+        setError({ message: `The scan failed: ${message}` });
         setScanning(false);
       }
     }
@@ -186,7 +213,12 @@ export function EventFinder({ chartId }: Props) {
         </div>
       </form>
 
-      {error && <div className={styles.error}>{error}</div>}
+      {error && (
+        <div className={styles.error}>
+          {error.message}
+          {error.stack && <pre className={styles.errorStack}>{error.stack}</pre>}
+        </div>
+      )}
 
       {scanning && (
         <div className={styles.scanning}>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { findSignificantEvents } from "@/lib/events/find";
 import { ChartNotFoundError } from "@/lib/transits";
+import { internalErrorResponse } from "@/lib/apiErrors";
 import { EventsFindInput } from "@/lib/validation";
 
 type Ctx = { params: { id: string } };
@@ -27,7 +28,6 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     if (err instanceof ChartNotFoundError) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
-    console.error("[POST /api/charts/:id/events]", err);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return internalErrorResponse("[POST /api/charts/:id/events]", err);
   }
 }
