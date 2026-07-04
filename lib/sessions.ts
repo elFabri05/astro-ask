@@ -36,6 +36,25 @@ export interface SessionWithMessages extends SessionRecord {
   messages: MessageRecord[];
 }
 
+// One row of the cross-date history stack: self-describing (carries its
+// transit's date/time/place, or is marked natal) so the UI never has to
+// resolve context to render it. transitChartId rides along so a click can
+// restore the exact TransitChart, not re-derive it from the date.
+export interface ChartSessionEntry {
+  id:        string;
+  title:     string | null;
+  createdAt: Date;
+  kind:      "natal" | "transit";
+  transitContext?: {
+    transitChartId: string;
+    targetDate:     string;
+    localTime?:     string;
+    placeLabel?:    string;
+  };
+  lastMessageAt: Date;
+  messageCount:  number;
+}
+
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 function toMessageRecord(row: {
@@ -129,6 +148,39 @@ export async function listSessions(
     include: { _count: { select: { messages: true } } },
   });
   return rows.map(({ _count, ...r }) => ({ ...r, messageCount: _count.messages }));
+}
+
+// Every session on the chart — all transit dates plus natal — for the
+// Conversations history stack. Ordered by most recent activity: the last
+// message's time, falling back to createdAt for sessions with no messages.
+export async function listSessionsForChart(chartId: string): Promise<ChartSessionEntry[]> {
+  const rows = await prisma.session.findMany({
+    where: { chartId },
+    include: {
+      transitChart: { select: { id: true, targetDate: true, localTime: true, placeLabel: true } },
+      _count:       { select: { messages: true } },
+      messages:     { orderBy: { createdAt: "desc" }, take: 1, select: { createdAt: true } },
+    },
+  });
+
+  return rows
+    .map((r): ChartSessionEntry => ({
+      id:        r.id,
+      title:     r.title,
+      createdAt: r.createdAt,
+      kind:      r.transitChart ? "transit" : "natal",
+      ...(r.transitChart && {
+        transitContext: {
+          transitChartId: r.transitChart.id,
+          targetDate:     r.transitChart.targetDate,
+          ...(r.transitChart.localTime  && { localTime:  r.transitChart.localTime }),
+          ...(r.transitChart.placeLabel && { placeLabel: r.transitChart.placeLabel }),
+        },
+      }),
+      lastMessageAt: r.messages[0]?.createdAt ?? r.createdAt,
+      messageCount:  r._count.messages,
+    }))
+    .sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime());
 }
 
 export async function getSession(sessionId: string): Promise<SessionRecord | null> {

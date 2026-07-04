@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getOrCreateTransitChart, ChartNotFoundError } from "@/lib/transits";
+import { getOrCreateTransitChart, getTransitChartById, ChartNotFoundError } from "@/lib/transits";
 import { getOrCreateTransitOpener } from "@/lib/interpret";
 import { TransitTargetInput, parsePlaceQueryParams } from "@/lib/validation";
 
@@ -7,6 +7,25 @@ type Ctx = { params: { id: string } };
 
 export async function GET(req: NextRequest, { params }: Ctx) {
   const sp = req.nextUrl.searchParams;
+
+  // ?transitChartId= — exact lookup of an already-computed TransitChart, used
+  // by the history stack to restore a past session's context byte-for-byte
+  // instead of re-resolving it from date+time+place.
+  const transitChartId = sp.get("transitChartId");
+  if (transitChartId) {
+    try {
+      const record = await getTransitChartById(transitChartId);
+      if (!record || record.chartId !== params.id) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      const opener = await getOrCreateTransitOpener(params.id, record.id);
+      return NextResponse.json({ ...record, opener: opener.content });
+    } catch (err) {
+      console.error("[GET transits]", err);
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    }
+  }
+
   const targetDate = sp.get("date");
   if (!targetDate) {
     return NextResponse.json({ error: "date must be YYYY-MM-DD" }, { status: 400 });

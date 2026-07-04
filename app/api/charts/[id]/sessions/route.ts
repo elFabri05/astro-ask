@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { startSessionFromFirstMessage, listSessions, ChartNotFoundError } from "@/lib/sessions";
+import {
+  startSessionFromFirstMessage, listSessions, listSessionsForChart, ChartNotFoundError,
+} from "@/lib/sessions";
 import { SessionStartInput } from "@/lib/validation";
 
 type Ctx = { params: { id: string } };
@@ -31,14 +33,18 @@ export async function POST(req: NextRequest, { params }: Ctx) {
   }
 }
 
-// Lists sessions for a specific, already-resolved TransitChart (the client
-// resolves date+time+place to a transitChartId via /api/charts/:id/transits
-// first). Omitting transitChartId lists the natal session.
+// With ?transitChartId= — sessions for that specific, already-resolved
+// TransitChart (the per-transit switcher; the client resolves date+time+place
+// to an id via /api/charts/:id/transits first). Without it — the full
+// cross-date history for the chart, newest activity first, natal included
+// (the Conversations stack).
 export async function GET(req: NextRequest, { params }: Ctx) {
   const transitChartId = req.nextUrl.searchParams.get("transitChartId");
 
   try {
-    const sessions = await listSessions(params.id, transitChartId);
+    const sessions = transitChartId
+      ? await listSessions(params.id, transitChartId)
+      : await listSessionsForChart(params.id);
     return NextResponse.json(sessions);
   } catch (err) {
     console.error("[GET /api/charts/:id/sessions]", err);

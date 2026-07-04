@@ -15,7 +15,7 @@
 }
 
 .headerInner {
-  max-width: 840px;
+  max-width: 1160px;
   margin: 0 auto;
   padding: 1.5rem 1.25rem;
   display: flex;
@@ -67,6 +67,8 @@
   color: var(--text-muted);
   margin-top: 0.125rem;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .activeDate {
@@ -267,9 +269,33 @@
 /* ─── main ───────────────────────────────────────────────────────────────────── */
 
 .main {
-  max-width: 840px;
+  max-width: 1160px;
   margin: 0 auto;
   padding: 2rem 1.25rem 3rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 2.5rem;
+  align-items: start;
+}
+
+.threadCol {
+  min-width: 0;
+}
+
+/* Sticks just below the collapsed header; the stack scrolls internally. */
+.historyCol {
+  position: sticky;
+  top: 76px;
+}
+
+@media (max-width: 960px) {
+  .main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .historyCol {
+    position: static;
+  }
 }
 
 .loading {

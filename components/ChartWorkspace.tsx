@@ -3,10 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { ChartData } from "@/lib/ephemeris";
-import type { SessionSummary, SessionWithMessages, MessageRecord } from "@/lib/sessions";
+import type {
+  SessionSummary, SessionWithMessages, MessageRecord, ChartSessionEntry,
+} from "@/lib/sessions";
 import { CompactChartWheel } from "./CompactChartWheel";
 import { ChatSession } from "./ChatSession";
 import { TransientTransitChat } from "./TransientTransitChat";
+import { SessionStack, type SessionStackEntry } from "./SessionStack";
 import { PlaceAutocomplete, type ResolvedPlace } from "./PlaceAutocomplete";
 import styles from "./ChartWorkspace.module.css";
 
@@ -54,6 +57,9 @@ interface Props {
   // null = no Session exists yet for initialTransit; the workspace renders
   // the transient (unsaved) view until the user's first message.
   initialActive:   SessionWithMessages | null;
+  // Every session on the chart across all transit dates (plus natal) — the
+  // Conversations stack. Broader than initialSessions, which is per-transit.
+  initialHistory:  ChartSessionEntry[];
 }
 
 // Distinguishes two different transits on the same calendar date — e.g.
@@ -65,7 +71,9 @@ function transitLabel(t: TransitContext): string {
   return label;
 }
 
-export function ChartWorkspace({ chart, initialTransit, initialSessions, initialActive }: Props) {
+export function ChartWorkspace({
+  chart, initialTransit, initialSessions, initialActive, initialHistory,
+}: Props) {
   const router   = useRouter();
   const pathname = usePathname();
 
@@ -82,7 +90,9 @@ export function ChartWorkspace({ chart, initialTransit, initialSessions, initial
   const [transit, setTransit]     = useState<TransitContext>(initialTransit);
   const [sessions, setSessions]   = useState<SessionSummary[]>(initialSessions);
   const [active, setActive]       = useState<SessionWithMessages | null>(initialActive);
+  const [history, setHistory]     = useState<ChartSessionEntry[]>(initialHistory);
   const [applying, setApplying]   = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const [switcherBusy, setSwitcherBusy] = useState(false);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -181,6 +191,23 @@ export function ChartWorkspace({ chart, initialTransit, initialSessions, initial
   function handlePromoted(session: SessionWithMessages) {
     messagesCache.current.set(session.id, session.messages);
     setSessions(prev => [{ ...session, messageCount: session.messages.length }, ...prev]);
+    setHistory(prev => [
+      {
+        id:        session.id,
+        title:     session.title,
+        createdAt: session.createdAt,
+        kind:      "transit",
+        transitContext: {
+          transitChartId: transit.id,
+          targetDate:     transit.targetDate,
+          ...(transit.localTime  && { localTime:  transit.localTime }),
+          ...(transit.placeLabel && { placeLabel: transit.placeLabel }),
+        },
+        lastMessageAt: session.createdAt,
+        messageCount:  session.messages.length,
+      },
+      ...prev,
+    ]);
     setActive(session);
     updateUrl(transit, session.id);
   }
@@ -201,6 +228,58 @@ export function ChartWorkspace({ chart, initialTransit, initialSessions, initial
 
     setActive({ ...summary, messages: messages! });
     updateUrl(transit, id);
+  }
+
+  // A click in the Conversations stack. Natal sessions live on the natal
+  // page; sessions of the loaded transit swap in place; sessions of another
+  // transit restore that exact TransitChart by id (never re-resolved from
+  // date+time+place) along with its session list, then open the thread.
+  async function handleStackSelect(entry: SessionStackEntry) {
+    if (entry.id === active?.id) return;
+
+    if (entry.kind === "natal") {
+      router.push(`/chart/${chart.id}?session=${entry.id}`);
+      return;
+    }
+
+    const targetTransitId = entry.transitContext?.transitChartId;
+    if (!targetTransitId) return;
+
+    if (targetTransitId === transit.id) {
+      void handleSelectSession(entry.id);
+      return;
+    }
+
+    setSwitcherOpen(false);
+    setRestoring(true);
+    try {
+      const cached = messagesCache.current.get(entry.id);
+      const [nextTransit, list, messages] = await Promise.all([
+        fetch(`/api/charts/${chart.id}/transits?transitChartId=${targetTransitId}`)
+          .then(r => r.json()) as Promise<TransitContext>,
+        fetch(`/api/charts/${chart.id}/sessions?transitChartId=${targetTransitId}`)
+          .then(r => r.json()) as Promise<SessionSummary[]>,
+        cached ?? (fetch(`/api/sessions/${entry.id}/messages`)
+          .then(r => r.json()) as Promise<MessageRecord[]>),
+      ]);
+
+      const summary = list.find(s => s.id === entry.id);
+      if (!summary) return;
+
+      messagesCache.current.set(entry.id, messages);
+      setTransit(nextTransit);
+      setSessions(list);
+      setActive({ ...summary, messages });
+      // Keep the header form in step with the restored transit.
+      setFormDate(nextTransit.targetDate);
+      setFormTime(nextTransit.localTime ?? "");
+      setFormPlace(nextTransit.placeLabel
+        ? { label: nextTransit.placeLabel, latitude: nextTransit.latitude, longitude: nextTransit.longitude }
+        : null);
+      updateUrl(nextTransit, entry.id);
+    } finally {
+      setRestoring(false);
+    }
   }
 
   const sun  = chart.chartData.positions.find(p => p.body === "Sun");
@@ -312,26 +391,40 @@ export function ChartWorkspace({ chart, initialTransit, initialSessions, initial
       </header>
 
       <main className={styles.main}>
-        {applying ? (
-          <div className={styles.loading}>Computing transits for {formDate}…</div>
-        ) : active ? (
-          <ChatSession
-            key={active.id}
-            sessionId={active.id}
-            initialMessages={active.messages.map(m => ({
-              id: m.id, role: m.role, content: m.content, createdAt: m.createdAt,
-            }))}
-            resumeOnMount={active.messages.length === 2}
-          />
-        ) : (
-          <TransientTransitChat
-            key={transit.id}
+        <div className={styles.threadCol}>
+          {applying ? (
+            <div className={styles.loading}>Computing transits for {formDate}…</div>
+          ) : restoring ? (
+            <div className={styles.loading}>Opening conversation…</div>
+          ) : active ? (
+            <ChatSession
+              key={active.id}
+              sessionId={active.id}
+              initialMessages={active.messages.map(m => ({
+                id: m.id, role: m.role, content: m.content, createdAt: m.createdAt,
+              }))}
+              resumeOnMount={active.messages.length === 2}
+            />
+          ) : (
+            <TransientTransitChat
+              key={transit.id}
+              chartId={chart.id}
+              transitChartId={transit.id}
+              openerText={transit.opener}
+              onPromoted={handlePromoted}
+            />
+          )}
+        </div>
+
+        <aside className={styles.historyCol}>
+          <SessionStack
             chartId={chart.id}
-            transitChartId={transit.id}
-            openerText={transit.opener}
-            onPromoted={handlePromoted}
+            entries={history}
+            activeSessionId={active?.id ?? null}
+            onSelect={handleStackSelect}
+            busy={applying || restoring}
           />
-        )}
+        </aside>
       </main>
     </div>
   );

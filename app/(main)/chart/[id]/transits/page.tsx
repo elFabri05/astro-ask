@@ -1,8 +1,10 @@
 import { notFound } from "next/navigation";
 import { getBirthChart } from "@/lib/charts";
-import { getOrCreateTransitChart } from "@/lib/transits";
+import { getOrCreateTransitChart, getTransitChartById, type TransitChartRecord } from "@/lib/transits";
 import { getOrCreateTransitOpener } from "@/lib/interpret";
-import { listSessions, getMessages, type SessionSummary } from "@/lib/sessions";
+import {
+  listSessions, listSessionsForChart, getSession, getMessages, type SessionSummary,
+} from "@/lib/sessions";
 import { ChartWorkspace } from "@/components/ChartWorkspace";
 import { ChartModeToggle } from "@/components/ChartModeToggle";
 import styles from "./page.module.css";
@@ -37,17 +39,31 @@ export default async function ChartTransitsPage({ params, searchParams }: Props)
         }
       : undefined;
 
-  // Resolve (not force-create) the transit for this combination, mirroring
-  // the client-side apply flow: reuse whatever's cached, compute only if this
-  // exact date+time+place has never been explored on this chart. The opener
-  // is cached the same way, independent of any Session.
-  const transitChart = await getOrCreateTransitChart(params.id, {
-    targetDate,
-    localTime: searchParams.time,
-    place,
-  });
+  // Arriving via the history stack (?session=): restore that session's exact
+  // TransitChart by id, never re-resolved from date+time+place — the thread
+  // must reopen against the transit it was held on.
+  let transitChart: TransitChartRecord | null = null;
+  if (searchParams.session) {
+    const requested = await getSession(searchParams.session);
+    if (requested && requested.chartId === params.id && requested.transitChartId) {
+      transitChart = await getTransitChartById(requested.transitChartId);
+    }
+  }
+
+  // Otherwise resolve (not force-create) the transit for this combination,
+  // mirroring the client-side apply flow: reuse whatever's cached, compute
+  // only if this exact date+time+place has never been explored on this
+  // chart. The opener is cached the same way, independent of any Session.
+  if (!transitChart) {
+    transitChart = await getOrCreateTransitChart(params.id, {
+      targetDate,
+      localTime: searchParams.time,
+      place,
+    });
+  }
   const opener = await getOrCreateTransitOpener(params.id, transitChart.id);
   const sessions = await listSessions(params.id, transitChart.id);
+  const history = await listSessionsForChart(params.id);
 
   const activeSummary: SessionSummary | undefined =
     (searchParams.session && sessions.find(s => s.id === searchParams.session)) || sessions[0];
@@ -85,6 +101,7 @@ export default async function ChartTransitsPage({ params, searchParams }: Props)
         }}
         initialSessions={sessions}
         initialActive={active}
+        initialHistory={history}
       />
     </div>
   );

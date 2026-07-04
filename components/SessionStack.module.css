@@ -1,0 +1,176 @@
+.panel {
+  max-height: calc(100vh - 7rem);
+  overflow-y: auto;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.panelTitle {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.panelCount {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+/* ─── the rail ─────────────────────────────────────────────────────────────────
+   A thin vertical line threads the stack, one node per reading — the active
+   session's node is filled. Cards sit to its right. */
+
+.list {
+  position: relative;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-left: 1.125rem;
+}
+
+.list::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 16px;
+  bottom: 16px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--border);
+}
+
+.item {
+  position: relative;
+}
+
+.node {
+  position: absolute;
+  left: -17px;
+  top: 13px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 2px solid var(--border);
+  transition: background var(--transition), border-color var(--transition),
+              box-shadow var(--transition);
+}
+
+.card:hover:not(:disabled) .node {
+  border-color: var(--accent);
+}
+
+.nodeActive,
+.card:hover:not(:disabled) .nodeActive {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+}
+
+/* ─── cards ──────────────────────────────────────────────────────────────────── */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  width: 100%;
+  padding: 0.625rem 0.75rem;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.card:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.card:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.card:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.cardActive,
+.cardActive:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: rgba(79, 70, 229, 0.05);
+}
+
+.context {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.kindTag {
+  flex-shrink: 0;
+  font-size: 0.625rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  line-height: 1.4;
+  padding: 0.05rem 0.375rem;
+  border-radius: 999px;
+}
+
+.kindNatal {
+  background: rgba(79, 70, 229, 0.1);
+  color: var(--accent);
+}
+
+.kindTransit {
+  background: var(--bg);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.contextText {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meta {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.empty {
+  padding: 1rem;
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius-lg);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
