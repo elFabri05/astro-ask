@@ -83,7 +83,7 @@
   align-items: flex-start;
   gap: 0.25rem;
   width: 100%;
-  padding: 0.625rem 0.75rem;
+  padding: 0.625rem 2rem 0.625rem 0.75rem;
   text-align: left;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -164,6 +164,42 @@
 .meta {
   font-size: 0.75rem;
   color: var(--text-muted);
+}
+
+/* Same affordance as the Sidebar's chart delete. Sits over the card's
+   reserved right padding — a sibling of the card button, never nested. */
+.deleteBtn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.deleteBtn:hover:not(:disabled) {
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.deleteBtn:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+
+.deleteBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .empty {

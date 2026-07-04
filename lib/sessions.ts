@@ -187,6 +187,14 @@ export async function getSession(sessionId: string): Promise<SessionRecord | nul
   return prisma.session.findUnique({ where: { id: sessionId } });
 }
 
+// Removes the session and, via the Message→Session cascade, its messages —
+// nothing else. The TransitChart it may point at and the cached opener
+// interpretation are shared with sibling sessions on the same transit and
+// stay untouched. Throws Prisma's P2025 if id doesn't exist.
+export async function deleteSession(sessionId: string): Promise<void> {
+  await prisma.session.delete({ where: { id: sessionId } });
+}
+
 export async function getMessages(sessionId: string): Promise<MessageRecord[]> {
   const rows = await prisma.message.findMany({
     where:   { sessionId },

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import styles from "./SessionStack.module.css";
 
@@ -27,6 +28,9 @@ interface Props {
   // Views that can swap context in place (the transit workspace) override
   // this; the default navigates to the entry's home view with ?session=.
   onSelect?: (entry: SessionStackEntry) => void;
+  // Called once a session has been deleted server-side, so the owning view
+  // can drop it from its own state; the default refreshes the route instead.
+  onDeleted?: (entry: SessionStackEntry) => void;
   busy?: boolean;
 }
 
@@ -68,13 +72,33 @@ function cx(...classes: Array<string | false | undefined>): string {
 // The cross-date history for a chart: every conversation, newest activity
 // first, each card self-describing (title + natal/transit context + activity
 // meta). Clicking a card reopens that conversation in its own context.
-export function SessionStack({ chartId, entries, activeSessionId, onSelect, busy }: Props) {
+export function SessionStack({ chartId, entries, activeSessionId, onSelect, onDeleted, busy }: Props) {
   const router = useRouter();
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   function handleClick(entry: SessionStackEntry) {
     if (entry.id === activeSessionId) return;
     if (onSelect) onSelect(entry);
     else router.push(sessionHref(chartId, entry));
+  }
+
+  // Same confirm→delete→reroute pattern as chart-delete in the Sidebar. Only
+  // the Session and its messages go; the transit and its cached reading are
+  // shared with sibling sessions and survive.
+  async function handleDelete(entry: SessionStackEntry) {
+    const label = entry.title ?? "New conversation";
+    if (!window.confirm(`Delete "${label}"? This removes its messages too.`)) return;
+
+    setDeletingId(entry.id);
+    try {
+      const res = await fetch(`/api/sessions/${entry.id}`, { method: "DELETE" });
+      if (!res.ok && res.status !== 404) return; // leave the row, nothing changed
+
+      if (onDeleted) onDeleted(entry);
+      else router.refresh();
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   return (
@@ -92,13 +116,14 @@ export function SessionStack({ chartId, entries, activeSessionId, onSelect, busy
         <ol className={styles.list}>
           {entries.map(entry => {
             const isActive = entry.id === activeSessionId;
+            const isDeleting = entry.id === deletingId;
             return (
               <li key={entry.id} className={styles.item}>
                 <button
                   type="button"
                   className={cx(styles.card, isActive && styles.cardActive)}
                   onClick={() => handleClick(entry)}
-                  disabled={busy}
+                  disabled={busy || isDeleting}
                   aria-current={isActive || undefined}
                 >
                   <span className={cx(styles.node, isActive && styles.nodeActive)} aria-hidden />
@@ -118,6 +143,16 @@ export function SessionStack({ chartId, entries, activeSessionId, onSelect, busy
                     {entry.messageCount} message{entry.messageCount === 1 ? "" : "s"}
                     {" · "}{timeAgo(entry.lastMessageAt)}
                   </span>
+                </button>
+                <button
+                  type="button"
+                  className={styles.deleteBtn}
+                  onClick={() => handleDelete(entry)}
+                  disabled={busy || isDeleting}
+                  aria-label={`Delete conversation "${entry.title ?? "New conversation"}"`}
+                  title="Delete conversation"
+                >
+                  ×
                 </button>
               </li>
             );

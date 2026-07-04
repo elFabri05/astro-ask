@@ -282,6 +282,20 @@ export function ChartWorkspace({
     }
   }
 
+  // A session was deleted from the stack (already gone server-side). Drop it
+  // from local state; if it was the open thread, fall back to the transient
+  // opening-reading view for the loaded transit — the same state as "date
+  // selected, no message sent yet". Never auto-open another session.
+  function handleDeleted(entry: SessionStackEntry) {
+    messagesCache.current.delete(entry.id);
+    setHistory(prev => prev.filter(e => e.id !== entry.id));
+    setSessions(prev => prev.filter(s => s.id !== entry.id));
+    if (entry.id === active?.id) {
+      setActive(null);
+      updateUrl(transit, null);
+    }
+  }
+
   const sun  = chart.chartData.positions.find(p => p.body === "Sun");
   const moon = chart.chartData.positions.find(p => p.body === "Moon");
 
@@ -422,6 +436,7 @@ export function ChartWorkspace({
             entries={history}
             activeSessionId={active?.id ?? null}
             onSelect={handleStackSelect}
+            onDeleted={handleDeleted}
             busy={applying || restoring}
           />
         </aside>
