@@ -1,12 +1,11 @@
 import { prisma } from "./db";
 import { getBirthChart } from "./charts";
+import { getTransitChartById, ChartNotFoundError, type TransitData } from "./transits";
 import {
-  getOrCreateTransitChart, getTransitChartById,
-  ChartNotFoundError, type TransitData,
-} from "./transits";
-import { getNatalInterpretation, generateNatalInterpretation, getOrCreateTransitOpener } from "./interpret";
+  getNatalInterpretation, generateNatalInterpretation,
+  getOrCreateTransitOpener, generateSessionTitle,
+} from "./interpret";
 import type { ChartData } from "./ephemeris";
-import type { ResolvedPlace } from "./geo";
 
 export { ChartNotFoundError };
 export class SessionNotFoundError extends Error {}
@@ -56,35 +55,20 @@ export function deriveTitle(text: string): string {
 
 // ─── service functions ────────────────────────────────────────────────────────
 
-// Creates a new Session and seeds it with the opening interpretation.
-// Seeding rule: if this date (or the natal chart) already has a stored
-// opener, reuse it verbatim — no LLM call. "New session" always creates a
-// fresh Session row, but never a fresh generation for an explored date.
-export async function createSession(input: {
-  chartId: string;
-  targetDate?: string;
-  localTime?: string;
-  place?: ResolvedPlace;
-}): Promise<SessionWithMessages> {
-  const { chartId, targetDate, localTime, place } = input;
-
+// Creates the (single) natal session for a chart, seeded with the natal
+// interpretation as its opening message — reused verbatim if already cached.
+// Unlike transit sessions, the natal session is still created eagerly: there
+// is exactly one per chart and no per-visit "transit combination" to key a
+// transient view on.
+export async function createNatalSession(chartId: string): Promise<SessionWithMessages> {
   const chart = await getBirthChart(chartId);
   if (!chart) throw new ChartNotFoundError(`Chart not found: ${chartId}`);
 
-  let transitChartId: string | null = null;
-  let openerText: string;
-
-  if (targetDate) {
-    const transitChart = await getOrCreateTransitChart(chartId, { targetDate, localTime, place });
-    transitChartId = transitChart.id;
-    openerText = (await getOrCreateTransitOpener(chartId, transitChart.id)).content;
-  } else {
-    const existing = await getNatalInterpretation(chartId);
-    openerText = existing ? existing.content : (await generateNatalInterpretation(chartId)).content;
-  }
+  const existing = await getNatalInterpretation(chartId);
+  const openerText = existing ? existing.content : (await generateNatalInterpretation(chartId)).content;
 
   const session = await prisma.session.create({
-    data: { chartId, transitChartId },
+    data: { chartId, transitChartId: null },
   });
 
   const opener = await prisma.message.create({
@@ -92,6 +76,45 @@ export async function createSession(input: {
   });
 
   return { ...session, messages: [toMessageRecord(opener)] };
+}
+
+// Promotes a transient transit view into a real, persisted Session — called
+// only on the user's first message for that transit combination. Adopts the
+// already-cached opener as message #1 (never regenerates it), persists the
+// first user message as #2, and generates the title from both before
+// returning. The assistant's reply to that first message is streamed and
+// persisted separately, by a follow-up "resume" call to the chat route.
+export async function startSessionFromFirstMessage(input: {
+  chartId: string;
+  transitChartId: string;
+  firstUserMessage: string;
+}): Promise<SessionWithMessages> {
+  const { chartId, transitChartId, firstUserMessage } = input;
+
+  const [chart, transitChart] = await Promise.all([
+    getBirthChart(chartId),
+    getTransitChartById(transitChartId),
+  ]);
+  if (!chart) throw new ChartNotFoundError(`Chart not found: ${chartId}`);
+  if (!transitChart) throw new Error(`Transit chart not found: ${transitChartId}`);
+
+  const [opener, title] = await Promise.all([
+    getOrCreateTransitOpener(chartId, transitChartId),
+    generateSessionTitle({ transitData: transitChart.transitData, firstUserMessage }),
+  ]);
+
+  const session = await prisma.session.create({
+    data: { chartId, transitChartId, title },
+  });
+
+  const openerMessage = await prisma.message.create({
+    data: { sessionId: session.id, role: "assistant", content: opener.content },
+  });
+  const userMessage = await prisma.message.create({
+    data: { sessionId: session.id, role: "user", content: firstUserMessage },
+  });
+
+  return { ...session, messages: [toMessageRecord(openerMessage), toMessageRecord(userMessage)] };
 }
 
 // Sessions for a given (chartId, transitChartId) — pass null for natal

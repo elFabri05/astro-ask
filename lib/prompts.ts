@@ -250,3 +250,58 @@ export function buildTransitContext(natal: ChartData, transit: TransitData): str
 
   return lines.join("\n");
 }
+
+// ─── session title ────────────────────────────────────────────────────────────
+
+export function buildTitleSystemPrompt(): string {
+  return `You write short, specific titles for astrology chat sessions.
+
+Given a set of transit aspects and the person's first question about them, write one short title
+(4-8 words) that names a real aspect or pattern from the data and ties it to the theme of their
+question.
+
+STRICT CONSTRAINTS — follow these without exception:
+1. Name only an aspect or pattern that literally appears in the data given. Never invent one.
+2. Prefer the most exact or tightest-orb aspect, or a named pattern (e.g. a full moon: Sun
+   opposition Moon) if one stands out.
+3. Keep it to 4-8 words, in title case or sentence case. No trailing punctuation, no quotation
+   marks, no "Title:" prefix or other label.
+4. Output only the title itself, nothing else.
+
+Example shapes (not the content to copy): "Full moon on natal Venus — career", "Saturn square Sun
+— relationship doubts".`.trimStart();
+}
+
+// Compact on purpose — this backs a single cheap LLM call per new session, so
+// it lists aspects only rather than the full natal+transit fact block used
+// for the opener and follow-up turns.
+export function buildTitleUserPrompt(transit: TransitData, firstUserMessage: string): string {
+  const lines: string[] = [];
+
+  lines.push("## Transit-to-transit aspects (the sky's own configuration)");
+  if (transit.transitToTransitAspects.length === 0) {
+    lines.push("(none within orb)");
+  } else {
+    for (const a of transit.transitToTransitAspects) {
+      lines.push(`- transiting ${a.body1} ${a.type} transiting ${a.body2} (orb ${a.orb.toFixed(2)}°)`);
+    }
+  }
+  lines.push("");
+
+  lines.push("## Transit-to-natal aspects (contact with this person's chart)");
+  if (transit.transitToNatalAspects.length === 0) {
+    lines.push("(none within orb)");
+  } else {
+    for (const a of transit.transitToNatalAspects) {
+      lines.push(`- transiting ${a.body1} ${a.type} natal ${a.body2} (orb ${a.orb.toFixed(2)}°)`);
+    }
+  }
+  lines.push("");
+
+  lines.push("## Their first question");
+  lines.push(firstUserMessage);
+  lines.push("");
+  lines.push("Write the title now.");
+
+  return lines.join("\n");
+}

@@ -6,6 +6,7 @@ import type { ChartData } from "@/lib/ephemeris";
 import type { SessionSummary, SessionWithMessages, MessageRecord } from "@/lib/sessions";
 import { CompactChartWheel } from "./CompactChartWheel";
 import { ChatSession } from "./ChatSession";
+import { TransientTransitChat } from "./TransientTransitChat";
 import { PlaceAutocomplete, type ResolvedPlace } from "./PlaceAutocomplete";
 import styles from "./ChartWorkspace.module.css";
 
@@ -33,6 +34,8 @@ interface ChartInfo {
 
 // The resolved TransitChart currently loaded — the unit sessions group by.
 // localTime/placeLabel are null when defaulted (noon UTC, natal location).
+// opener is the cached transient reading, computed eagerly on date-select
+// independent of whether any Session exists yet for this combination.
 interface TransitContext {
   id:         string;
   targetDate: string;
@@ -41,13 +44,16 @@ interface TransitContext {
   placeLabel: string | null;
   latitude:   number;
   longitude:  number;
+  opener:     string;
 }
 
 interface Props {
   chart:           ChartInfo;
   initialTransit:  TransitContext;
   initialSessions: SessionSummary[];
-  initialActive:   SessionWithMessages;
+  // null = no Session exists yet for initialTransit; the workspace renders
+  // the transient (unsaved) view until the user's first message.
+  initialActive:   SessionWithMessages | null;
 }
 
 // Distinguishes two different transits on the same calendar date — e.g.
@@ -75,14 +81,14 @@ export function ChartWorkspace({ chart, initialTransit, initialSessions, initial
 
   const [transit, setTransit]     = useState<TransitContext>(initialTransit);
   const [sessions, setSessions]   = useState<SessionSummary[]>(initialSessions);
-  const [active, setActive]       = useState<SessionWithMessages>(initialActive);
+  const [active, setActive]       = useState<SessionWithMessages | null>(initialActive);
   const [applying, setApplying]   = useState(false);
   const [switcherBusy, setSwitcherBusy] = useState(false);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 
   const messagesCache = useRef<Map<string, MessageRecord[]>>(
-    new Map([[initialActive.id, initialActive.messages]])
+    new Map(initialActive ? [[initialActive.id, initialActive.messages]] : [])
   );
 
   useEffect(() => {
@@ -93,8 +99,9 @@ export function ChartWorkspace({ chart, initialTransit, initialSessions, initial
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  function updateUrl(nextTransit: TransitContext, sessionId: string) {
-    const qs = new URLSearchParams({ date: nextTransit.targetDate, session: sessionId });
+  function updateUrl(nextTransit: TransitContext, sessionId: string | null) {
+    const qs = new URLSearchParams({ date: nextTransit.targetDate });
+    if (sessionId) qs.set("session", sessionId);
     if (nextTransit.localTime) qs.set("time", nextTransit.localTime);
     if (nextTransit.placeLabel) {
       qs.set("placeLabel", nextTransit.placeLabel);
@@ -126,8 +133,9 @@ export function ChartWorkspace({ chart, initialTransit, initialSessions, initial
         qs.set("placeLng", String(formPlace.longitude));
       }
 
-      // Resolve (and create, if never explored before) the TransitChart for
-      // this exact date+time+place — sessions group by its id, not the date.
+      // Resolve (and compute, if never explored before) the TransitChart +
+      // its opener for this exact date+time+place — sessions group by the
+      // TransitChart's id, not the date. No Session is created here.
       const nextTransit: TransitContext = await fetch(
         `/api/charts/${chart.id}/transits?${qs.toString()}`
       ).then(r => r.json());
@@ -136,68 +144,50 @@ export function ChartWorkspace({ chart, initialTransit, initialSessions, initial
         `/api/charts/${chart.id}/sessions?transitChartId=${nextTransit.id}`
       ).then(r => r.json());
 
-      let nextActive: SessionWithMessages;
-      let nextList: SessionSummary[];
+      let nextActive: SessionWithMessages | null;
 
       if (list.length === 0) {
-        const created: SessionWithMessages = await fetch(`/api/charts/${chart.id}/sessions`, {
-          method:  "POST",
-          headers: { "Content-Type": "application/json" },
-          body:    JSON.stringify({
-            targetDate: formDate,
-            localTime:  formTime || undefined,
-            place:      formPlace ?? undefined,
-          }),
-        }).then(r => r.json());
-        nextActive = created;
-        nextList = [{ ...created, messageCount: created.messages.length }];
+        // No Session for this transit yet — render the transient view.
+        nextActive = null;
       } else {
         const newest = list[0];
         const messages: MessageRecord[] = await fetch(
           `/api/sessions/${newest.id}/messages`
         ).then(r => r.json());
         nextActive = { ...newest, messages };
-        nextList = list;
       }
 
-      messagesCache.current.set(nextActive.id, nextActive.messages);
-      setSessions(nextList);
+      if (nextActive) messagesCache.current.set(nextActive.id, nextActive.messages);
+      setSessions(list);
       setActive(nextActive);
       setTransit(nextTransit);
-      updateUrl(nextTransit, nextActive.id);
+      updateUrl(nextTransit, nextActive?.id ?? null);
     } finally {
       setApplying(false);
     }
   }
 
-  async function handleNewSession() {
-    setSwitcherBusy(true);
-    try {
-      const created: SessionWithMessages = await fetch(`/api/charts/${chart.id}/sessions`, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({
-          targetDate: transit.targetDate,
-          localTime:  transit.localTime ?? undefined,
-          place:      transit.placeLabel
-            ? { label: transit.placeLabel, latitude: transit.latitude, longitude: transit.longitude }
-            : undefined,
-        }),
-      }).then(r => r.json());
+  // "New session" on an already-explored transit never creates a Session
+  // directly — it just resets to a fresh transient view (same cached
+  // opener), which persists on its own first message like any other.
+  function handleNewSession() {
+    setSwitcherOpen(false);
+    setActive(null);
+    updateUrl(transit, null);
+  }
 
-      messagesCache.current.set(created.id, created.messages);
-      setSessions(prev => [{ ...created, messageCount: created.messages.length }, ...prev]);
-      setActive(created);
-      setSwitcherOpen(false);
-      updateUrl(transit, created.id);
-    } finally {
-      setSwitcherBusy(false);
-    }
+  // Called by TransientTransitChat once the user's first message has
+  // promoted the transit into a real Session.
+  function handlePromoted(session: SessionWithMessages) {
+    messagesCache.current.set(session.id, session.messages);
+    setSessions(prev => [{ ...session, messageCount: session.messages.length }, ...prev]);
+    setActive(session);
+    updateUrl(transit, session.id);
   }
 
   async function handleSelectSession(id: string) {
     setSwitcherOpen(false);
-    if (id === active.id) return;
+    if (id === active?.id) return;
     const summary = sessions.find(s => s.id === id);
     if (!summary) return;
 
@@ -211,18 +201,6 @@ export function ChartWorkspace({ chart, initialTransit, initialSessions, initial
 
     setActive({ ...summary, messages: messages! });
     updateUrl(transit, id);
-  }
-
-  async function refreshSessionTitle() {
-    const list: SessionSummary[] = await fetch(
-      `/api/charts/${chart.id}/sessions?transitChartId=${transit.id}`
-    ).then(r => r.json());
-    setSessions(list);
-
-    // The switcher's toggle label reads active.title directly — patch it too,
-    // not just the dropdown list, or it stays stuck on "New session".
-    const updated = list.find(s => s.id === active.id);
-    if (updated) setActive(prev => ({ ...prev, title: updated.title }));
   }
 
   const sun  = chart.chartData.positions.find(p => p.body === "Sun");
@@ -298,7 +276,7 @@ export function ChartWorkspace({ chart, initialTransit, initialSessions, initial
                 onClick={() => setSwitcherOpen(o => !o)}
                 disabled={applying}
               >
-                {active.title ?? "New session"} <span className={styles.chevron}>▾</span>
+                {active?.title ?? "New session"} <span className={styles.chevron}>▾</span>
               </button>
 
               {switcherOpen && (
@@ -307,7 +285,7 @@ export function ChartWorkspace({ chart, initialTransit, initialSessions, initial
                     <button
                       key={s.id}
                       type="button"
-                      className={cx(styles.switcherItem, s.id === active.id && styles.switcherItemActive)}
+                      className={cx(styles.switcherItem, s.id === active?.id && styles.switcherItemActive)}
                       onClick={() => handleSelectSession(s.id)}
                       disabled={switcherBusy}
                     >
@@ -322,7 +300,7 @@ export function ChartWorkspace({ chart, initialTransit, initialSessions, initial
                     type="button"
                     className={styles.newSessionBtn}
                     onClick={handleNewSession}
-                    disabled={switcherBusy}
+                    disabled={switcherBusy || !active}
                   >
                     + New session
                   </button>
@@ -336,14 +314,22 @@ export function ChartWorkspace({ chart, initialTransit, initialSessions, initial
       <main className={styles.main}>
         {applying ? (
           <div className={styles.loading}>Computing transits for {formDate}…</div>
-        ) : (
+        ) : active ? (
           <ChatSession
             key={active.id}
             sessionId={active.id}
             initialMessages={active.messages.map(m => ({
               id: m.id, role: m.role, content: m.content, createdAt: m.createdAt,
             }))}
-            onFirstExchangeComplete={() => { void refreshSessionTitle(); }}
+            resumeOnMount={active.messages.length === 2}
+          />
+        ) : (
+          <TransientTransitChat
+            key={transit.id}
+            chartId={chart.id}
+            transitChartId={transit.id}
+            openerText={transit.opener}
+            onPromoted={handlePromoted}
           />
         )}
       </main>

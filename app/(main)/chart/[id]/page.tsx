@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { getBirthChart } from "@/lib/charts";
-import { listSessions, getMessages, createSession } from "@/lib/sessions";
+import { listSessions, getMessages, createNatalSession } from "@/lib/sessions";
 import { ChartWheel } from "@/components/ChartWheel";
 import { PositionsTable } from "@/components/PositionsTable";
 import { ChatSession } from "@/components/ChatSession";
@@ -21,7 +21,7 @@ export default async function ChartPage({ params }: Props) {
   const sessions = await listSessions(params.id, null);
   const active = sessions[0]
     ? { ...sessions[0], messages: await getMessages(sessions[0].id) }
-    : await createSession({ chartId: params.id });
+    : await createNatalSession(params.id);
 
   const displayName = chart.name ? `${chart.name} — ` : "";
 

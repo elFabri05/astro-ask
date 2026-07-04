@@ -20,15 +20,29 @@ type Ctx = { params: { id: string } };
 
 interface ChatRequestBody {
   message?: { role?: string; content?: string };
+  // Set by the client immediately after promoting a transient view into a
+  // Session (see startSessionFromFirstMessage): the first user message is
+  // already persisted at that point, so this call must only generate and
+  // stream the reply to it, not append another copy.
+  resume?: boolean;
 }
 
 export async function POST(req: NextRequest, { params }: Ctx) {
   const sessionId = params.id;
 
   const body = await req.json().catch(() => null) as ChatRequestBody | null;
+  const resume = body?.resume === true;
   const incoming = body?.message;
-  if (!incoming || incoming.role !== "user" || typeof incoming.content !== "string" || !incoming.content.trim()) {
-    return NextResponse.json({ error: "message.content is required" }, { status: 400 });
+
+  // The incoming message is required unless resuming (see ChatRequestBody).
+  // Narrowed into a plain string here so the persist call below doesn't need
+  // a non-null assertion.
+  let userContent: string | null = null;
+  if (!resume) {
+    if (!incoming || incoming.role !== "user" || typeof incoming.content !== "string" || !incoming.content.trim()) {
+      return NextResponse.json({ error: "message.content is required" }, { status: 400 });
+    }
+    userContent = incoming.content;
   }
 
   try {
@@ -37,8 +51,11 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     const { natal, transit } = await getSessionChartContext(sessionId);
 
     // Persist the user's turn before generating, so it's part of the
-    // authoritative history even if generation fails downstream.
-    await appendUserMessage(sessionId, incoming.content);
+    // authoritative history even if generation fails downstream. Skipped on
+    // resume — that message was already persisted during promotion.
+    if (userContent !== null) {
+      await appendUserMessage(sessionId, userContent);
+    }
 
     const system = transit
       ? `${buildTransitSystemPrompt()}\n\n${buildTransitContext(natal, transit)}`
@@ -48,6 +65,10 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     // just persisted above. This — not the client's copy — is the source of
     // truth for history; the facts above are never part of it.
     const history = await getMessages(sessionId);
+
+    if (resume && history[history.length - 1]?.role !== "user") {
+      return NextResponse.json({ error: "Nothing to resume: no pending user message" }, { status: 400 });
+    }
 
     // As a thread grows, drop the oldest conversation turns before they'd
     // crowd out the system facts block — the facts are never trimmed.

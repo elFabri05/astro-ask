@@ -33,6 +33,15 @@ export const TransitTargetInput = z.object({
 
 export type TransitTargetInputType = z.infer<typeof TransitTargetInput>;
 
+// Promotes a transient transit view into a real Session — see
+// startSessionFromFirstMessage in lib/sessions.ts.
+export const SessionStartInput = z.object({
+  transitChartId: z.string().min(1),
+  message:        z.string().min(1),
+});
+
+export type SessionStartInputType = z.infer<typeof SessionStartInput>;
+
 // Place is all-or-nothing in query params: label + lat + lng together, or
 // omitted entirely. Shared by the transits and sessions GET routes, which
 // both accept the same optional place override shape.

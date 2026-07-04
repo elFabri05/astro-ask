@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateTransitChart, ChartNotFoundError } from "@/lib/transits";
+import { getOrCreateTransitOpener } from "@/lib/interpret";
 import { TransitTargetInput, parsePlaceQueryParams } from "@/lib/validation";
 
 type Ctx = { params: { id: string } };
@@ -30,7 +31,10 @@ export async function GET(req: NextRequest, { params }: Ctx) {
 
   try {
     const record = await getOrCreateTransitChart(params.id, parsed.data);
-    return NextResponse.json(record);
+    // The opener is fetched alongside the transit itself so date-select can
+    // render the transient reading in one round trip — see the transits page.
+    const opener = await getOrCreateTransitOpener(params.id, record.id);
+    return NextResponse.json({ ...record, opener: opener.content });
   } catch (err) {
     if (err instanceof ChartNotFoundError) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });

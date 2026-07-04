@@ -2,10 +2,11 @@ import { generateText } from "ai";
 import { google } from "@ai-sdk/google";
 import { prisma } from "./db";
 import { getBirthChart } from "./charts";
-import { getTransitChartById, ChartNotFoundError } from "./transits";
+import { getTransitChartById, ChartNotFoundError, type TransitData } from "./transits";
 import {
   buildNatalSystemPrompt, buildNatalUserPrompt,
   buildTransitSystemPrompt, buildTransitContext,
+  buildTitleSystemPrompt, buildTitleUserPrompt,
 } from "./prompts";
 
 // ─── config ───────────────────────────────────────────────────────────────────
@@ -121,4 +122,24 @@ export async function getOrCreateTransitOpener(
   });
 
   return toRecord(row);
+}
+
+// ─── session title (promotion from transient view) ────────────────────────────
+//
+// One small LLM call, run once per session at promotion time (see
+// startSessionFromFirstMessage in lib/sessions.ts) — not cached, since it only
+// ever runs once per Session and the result is stored directly on that row.
+
+export async function generateSessionTitle(input: {
+  transitData: TransitData;
+  firstUserMessage: string;
+}): Promise<string> {
+  const { text } = await generateText({
+    model:  google(MODEL_ID),
+    system: buildTitleSystemPrompt(),
+    prompt: buildTitleUserPrompt(input.transitData, input.firstUserMessage),
+  });
+
+  const title = text.trim().replace(/^["']|["']$/g, "");
+  return title.length > 80 ? `${title.slice(0, 77)}…` : title;
 }

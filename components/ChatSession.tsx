@@ -14,30 +14,37 @@ const SUGGESTIONS = [
 interface Props {
   sessionId: string;
   initialMessages: Message[];
-  // Fired once the FIRST exchange's assistant reply finishes streaming — by
-  // then the server has long since persisted the user message and derived
-  // the session title, so a refetch triggered here never races the write.
-  onFirstExchangeComplete?: () => void;
+  // True when this session was just promoted from a transient view: message
+  // #1 (opener) and #2 (the user's first message) are already persisted, and
+  // this mount must fetch/stream the reply to #2 without re-sending #2 as a
+  // new message — see the "resume" branch of experimental_prepareRequestBody.
+  resumeOnMount?: boolean;
 }
 
-export function ChatSession({ sessionId, initialMessages, onFirstExchangeComplete }: Props) {
+export function ChatSession({ sessionId, initialMessages, resumeOnMount }: Props) {
   const hasAskedBefore = initialMessages.some(m => m.role === "user");
-  const firstExchangeNotified = useRef(hasAskedBefore);
+  const pendingResume = useRef(resumeOnMount ?? false);
 
-  const { messages, input, handleInputChange, handleSubmit, append, status } = useChat({
+  const { messages, input, handleInputChange, handleSubmit, append, status, reload } = useChat({
     api: `/api/sessions/${sessionId}/chat`,
     id: sessionId,
     initialMessages,
-    experimental_prepareRequestBody: ({ messages }) => ({
-      message: messages[messages.length - 1],
-    }),
-    onFinish: () => {
-      if (!firstExchangeNotified.current) {
-        firstExchangeNotified.current = true;
-        onFirstExchangeComplete?.();
+    experimental_prepareRequestBody: ({ messages }) => {
+      if (pendingResume.current) {
+        pendingResume.current = false;
+        return { resume: true };
       }
+      return { message: messages[messages.length - 1] };
     },
   });
+
+  useEffect(() => {
+    if (resumeOnMount) void reload();
+    // Only ever fires once, right after mount — resumeOnMount is fixed for
+    // the lifetime of this component instance (a new promoted session
+    // remounts ChatSession via a fresh `key`, see ChartWorkspace).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const bottomRef = useRef<HTMLDivElement>(null);
 

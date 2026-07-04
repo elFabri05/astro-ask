@@ -1,29 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createSession, listSessions, ChartNotFoundError } from "@/lib/sessions";
-import { TransitTargetInput } from "@/lib/validation";
+import { startSessionFromFirstMessage, listSessions, ChartNotFoundError } from "@/lib/sessions";
+import { SessionStartInput } from "@/lib/validation";
 
 type Ctx = { params: { id: string } };
 
+// Promotes a transient transit view (opener shown, nothing persisted yet)
+// into a real Session, seeded by the user's first message — see
+// startSessionFromFirstMessage in lib/sessions.ts. The natal session has no
+// transient state and is created directly by its server page instead.
 export async function POST(req: NextRequest, { params }: Ctx) {
-  const body = await req.json().catch(() => ({})) as {
-    targetDate?: string;
-    localTime?: string;
-    place?: { label: string; latitude: number; longitude: number };
-  };
-
-  if (body.targetDate !== undefined || body.localTime !== undefined || body.place !== undefined) {
-    const parsed = TransitTargetInput.safeParse(body);
-    if (!parsed.success) {
-      return NextResponse.json({ error: parsed.error.flatten().fieldErrors }, { status: 400 });
-    }
+  const body = await req.json().catch(() => ({}));
+  const parsed = SessionStartInput.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error.flatten().fieldErrors }, { status: 400 });
   }
 
   try {
-    const session = await createSession({
-      chartId: params.id,
-      targetDate: body.targetDate,
-      localTime:  body.localTime,
-      place:      body.place,
+    const session = await startSessionFromFirstMessage({
+      chartId:          params.id,
+      transitChartId:   parsed.data.transitChartId,
+      firstUserMessage: parsed.data.message,
     });
     return NextResponse.json(session, { status: 201 });
   } catch (err) {
