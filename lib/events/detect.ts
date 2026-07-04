@@ -1,123 +1,236 @@
-// Deterministic event detection over a time window. Steps through the window
-// (daily by default), computes each day's transits with the existing engine
-// (computeTransitData → Swiss Ephemeris), and finds the moments something
-// discrete happens: an aspect going exact, a lunation, a station, an ingress.
+// Sky-event detection built on a single primitive: angle crossings between
+// two longitude series. Moon phases are Sun–Moon elongation crossing
+// 0/90/180/270; planet aspects are pairwise separation crossing 0/90/120/180.
+// Nothing else — no stations, no ingresses, no orb tracking.
 //
-// Everything here is astronomy: sign-change bracketing between consecutive
-// steps plus linear interpolation pins each event to a date. No model is
-// involved at any point — detection, timing, and the astrology tags attached
-// to each event (rawFactors, consumed by lib/events/score.ts and
-// lib/events/topic.ts) are all computed.
+// Deliberately samples ONLY the ten Sun–Pluto bodies via calc_ut, one call
+// per body per day. Chiron and the nodes are skipped: they pull in the
+// seas_*.se1 ephemeris-file dependency and aren't needed for sky events.
+//
+// Everything here is deterministic astronomy. Crossings are bracketed
+// between daily samples and refined by bisection (recomputing longitudes at
+// midpoints), so each event carries an accurate computed date. The model
+// never touches detection or timing.
 
-import {
-  lonToSignInfo,
-  assignHouse,
-  type ChartData,
-  type PlanetPosition,
-} from "../ephemeris";
-import { computeTransitData, type TransitData } from "../transits";
+import * as swe from "sweph";
+import { CALC_FLAGS, lonToSignInfo } from "../ephemeris";
+
+// ─── bodies ───────────────────────────────────────────────────────────────────
+
+export const SKY_BODIES = [
+  "Sun", "Moon", "Mercury", "Venus", "Mars",
+  "Jupiter", "Saturn", "Uranus", "Neptune", "Pluto",
+] as const;
+
+export type SkyBody = (typeof SKY_BODIES)[number];
+
+const BODY_IDS: Record<SkyBody, number> = {
+  Sun:     swe.constants.SE_SUN,
+  Moon:    swe.constants.SE_MOON,
+  Mercury: swe.constants.SE_MERCURY,
+  Venus:   swe.constants.SE_VENUS,
+  Mars:    swe.constants.SE_MARS,
+  Jupiter: swe.constants.SE_JUPITER,
+  Saturn:  swe.constants.SE_SATURN,
+  Uranus:  swe.constants.SE_URANUS,
+  Neptune: swe.constants.SE_NEPTUNE,
+  Pluto:   swe.constants.SE_PLUTO,
+};
+
+// Aspect pairs exclude the Moon — it crosses every angle to every planet
+// monthly, which is noise next to its phases (already covered above).
+const ASPECT_BODIES: readonly SkyBody[] = SKY_BODIES.filter(b => b !== "Moon");
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
-export type EventKind =
-  | "transit-natal-aspect" // a transit-to-natal aspect reaching exact
-  | "natal-house-ingress"  // a transiting planet crossing a natal house cusp
-  | "lunation"             // new or full moon
-  | "sky-conjunction"      // two transiting planets conjunct each other
-  | "station"              // a planet's longitude speed crossing zero
-  | "sign-ingress";        // an outer planet (Jupiter..Pluto) changing sign
-
 export interface DetectedEvent {
-  date: string;            // "YYYY-MM-DD" — interpolated to the exact crossing
-  kind: EventKind;
-  bodies: string[];        // transiting bodies involved
-  natalPoint?: string;     // for transit-natal-aspect: the natal point contacted
-  house?: number;          // the natal house the event lands in / ingresses into
-  aspectType?: string;     // for aspect events: conjunction | opposition | ...
-  motion?: "direct" | "retrograde"; // transiting body's motion at the event
-  description: string;     // short human label, built from computed facts only
-  rawFactors: string[];    // astrology tags for relevance/strength scoring
+  date: string;            // "YYYY-MM-DD", bisection-refined
+  kind: "moon_phase" | "aspect";
+  bodies: string[];
+  // moon_phase: elongation 0|90|180|270; aspect: separation 0|90|120|180.
+  angle: number;
+  label: string;           // short human text, built from computed facts only
+  factors: string[];       // involved planet names, for topic-relevance overlap
 }
 
 export interface ScanInput {
-  natal: ChartData;
   startDate: string;       // "YYYY-MM-DD" inclusive
   endDate: string;         // "YYYY-MM-DD" inclusive
   stepDays?: number;
 }
 
-// ─── detection tuning (deterministic policy, in one place) ───────────────────
-//
-// The Moon crosses every natal point and house cusp roughly monthly — as
-// individual "events" those are noise, so the Moon participates only through
-// lunations. The Sun never stations; the True Node's oscillating speed would
-// register as a constant stream of fake stations.
-
-const ASPECT_ANGLES: ReadonlyArray<{ type: string; angle: number }> = [
-  { type: "conjunction", angle: 0 },
-  { type: "sextile",     angle: 60 },
-  { type: "square",      angle: 90 },
-  { type: "trine",       angle: 120 },
-  { type: "opposition",  angle: 180 },
-];
-
-const NATAL_CONTACT_EXCLUDED = new Set(["Moon"]);
-const HOUSE_INGRESS_EXCLUDED = new Set(["Moon"]);
-const SKY_CONJUNCTION_EXCLUDED = new Set(["Moon"]);
-const STATION_EXCLUDED = new Set(["Moon", "Sun", "True Node"]);
-const SIGN_INGRESS_BODIES = new Set(["Jupiter", "Saturn", "Uranus", "Neptune", "Pluto"]);
-
-// Modern rulerships — used to tag contacts to the chart ruler (the planet
-// ruling the Ascendant sign) so scoring can weight them up.
-const SIGN_RULERS: Record<string, string> = {
-  Aries: "Mars",        Taurus: "Venus",     Gemini: "Mercury",
-  Cancer: "Moon",       Leo: "Sun",          Virgo: "Mercury",
-  Libra: "Venus",       Scorpio: "Pluto",    Sagittarius: "Jupiter",
-  Capricorn: "Saturn",  Aquarius: "Uranus",  Pisces: "Neptune",
-};
-
-export const CHART_RULER_TAG = "Chart Ruler";
-
-export function chartRulerOf(natal: ChartData): string {
-  return SIGN_RULERS[lonToSignInfo(natal.ascendant).sign];
-}
-
-// ─── helpers ──────────────────────────────────────────────────────────────────
+// ─── ephemeris sampling ───────────────────────────────────────────────────────
 
 const DAY_MS = 86_400_000;
 
-// Signed angular difference folded into [-180, 180).
-function wrap180(x: number): number {
-  return ((x + 180) % 360 + 360) % 360 - 180;
+function jdUt(dateMs: number): number {
+  const d = new Date(dateMs);
+  const res = swe.utc_to_jd(
+    d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(),
+    d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds(),
+    swe.constants.SE_GREG_CAL
+  );
+  if (res.flag < 0) throw new Error(`utc_to_jd failed: ${res.error}`);
+  return res.data[1];
 }
 
-// Fraction of the step at which d crosses zero between two samples, or null
-// if it doesn't. Zero is treated as non-negative so an exact-zero sample is
-// counted by exactly one of the two intervals it borders. The |d0−d1| < 180
-// guard rejects the artificial jump wrap180 produces at ±180.
-function zeroCrossing(d0: number, d1: number): number | null {
-  if ((d0 < 0) === (d1 < 0)) return null;
-  if (Math.abs(d0 - d1) >= 180) return null;
-  return d0 / (d0 - d1);
+// Longitude of one body at one instant — the only ephemeris call in this
+// module. Used both for the daily sweep and for bisection refinement.
+export function longitudeAt(body: SkyBody, dateMs: number): number {
+  const res = swe.calc_ut(jdUt(dateMs), BODY_IDS[body], CALC_FLAGS);
+  if (res.flag < 0) throw new Error(`calc_ut failed for ${body}: ${res.error}`);
+  return res.data[0];
+}
+
+export interface LongitudeSample {
+  date: string;                       // "YYYY-MM-DD" (noon UTC sample)
+  dateMs: number;
+  longitudes: Record<string, number>; // body → ecliptic longitude in degrees
+}
+
+// One pass over the window, computing only the requested bodies' longitudes
+// per day — no houses, no aspectarian, no full transit data.
+export function sampleLongitudes(input: {
+  bodies: readonly SkyBody[];
+  startDate: string;
+  endDate: string;
+  stepDays?: number;
+}): LongitudeSample[] {
+  const { bodies, startDate, endDate, stepDays = 1 } = input;
+  const startMs = Date.parse(`${startDate}T12:00:00Z`);
+  const endMs   = Date.parse(`${endDate}T12:00:00Z`);
+  if (Number.isNaN(startMs) || Number.isNaN(endMs)) {
+    throw new Error(`sampleLongitudes: invalid date range ${startDate}..${endDate}`);
+  }
+
+  const samples: LongitudeSample[] = [];
+  for (let ms = startMs; ms <= endMs; ms += stepDays * DAY_MS) {
+    const longitudes: Record<string, number> = {};
+    for (const body of bodies) {
+      longitudes[body] = longitudeAt(body, ms);
+    }
+    samples.push({ date: new Date(ms).toISOString().slice(0, 10), dateMs: ms, longitudes });
+  }
+  return samples;
+}
+
+// ─── the crossing primitive ───────────────────────────────────────────────────
+
+// A longitude time series: daily samples for bracketing, plus an evaluator
+// for bisection refinement. A transiting body's series recomputes via
+// calc_ut; a FIXED natal point is simply `lonAt: () => natalLongitude` —
+// same primitive, so natal contacts can reuse findCrossings later.
+export interface LongitudeSeries {
+  samples: ReadonlyArray<{ dateMs: number; lon: number }>;
+  lonAt: (dateMs: number) => number;
+}
+
+export function bodySeries(body: SkyBody, sampled: LongitudeSample[]): LongitudeSeries {
+  return {
+    samples: sampled.map(s => ({ dateMs: s.dateMs, lon: s.longitudes[body] })),
+    lonAt: ms => longitudeAt(body, ms),
+  };
+}
+
+export function fixedSeries(longitude: number, sampled: LongitudeSample[]): LongitudeSeries {
+  return {
+    samples: sampled.map(s => ({ dateMs: s.dateMs, lon: longitude })),
+    lonAt: () => longitude,
+  };
+}
+
+export interface Crossing {
+  dateMs: number;  // refined instant
+  angle: number;   // the target angle that was crossed (as passed in)
+}
+
+function norm360(x: number): number {
+  return ((x % 360) + 360) % 360;
+}
+
+// Signed angular difference folded into [-180, 180).
+function wrap180(x: number): number {
+  return norm360(x + 180) - 180;
+}
+
+// Bisection iterations: one day / 2^16 ≈ 1.3 seconds of precision, from ~32
+// extra calc_ut calls per detected crossing — refinement cost is confined to
+// actual events, never the whole sweep.
+const BISECTION_STEPS = 16;
+
+// Walk consecutive samples of the DIRECTED angle a−b (normalized to
+// [0,360)) and find where it crosses each target angle, refining each hit by
+// bisection. Directed means 90 and 270 are distinct targets — pass both when
+// an aspect is symmetric. Zero is treated as non-negative so a crossing
+// landing exactly on a sample is counted by exactly one interval; the
+// |g0−g1| < 180 guard rejects the artificial jump wrap180 produces at ±180.
+export function findCrossings(
+  seriesA: LongitudeSeries,
+  seriesB: LongitudeSeries,
+  targetAngles: readonly number[]
+): Crossing[] {
+  const a = seriesA.samples;
+  const b = seriesB.samples;
+  if (a.length !== b.length) {
+    throw new Error(`findCrossings: series lengths differ (${a.length} vs ${b.length})`);
+  }
+
+  const gapAt = (ms: number, target: number): number =>
+    wrap180(norm360(seriesA.lonAt(ms) - seriesB.lonAt(ms)) - target);
+
+  const crossings: Crossing[] = [];
+  for (let i = 0; i + 1 < a.length; i++) {
+    const sep0 = norm360(a[i].lon - b[i].lon);
+    const sep1 = norm360(a[i + 1].lon - b[i + 1].lon);
+
+    for (const target of targetAngles) {
+      let g0 = wrap180(sep0 - target);
+      const g1 = wrap180(sep1 - target);
+      if ((g0 < 0) === (g1 < 0)) continue;
+      if (Math.abs(g0 - g1) >= 180) continue;
+
+      let lo = a[i].dateMs;
+      let hi = a[i + 1].dateMs;
+      for (let step = 0; step < BISECTION_STEPS; step++) {
+        const mid = (lo + hi) / 2;
+        const gMid = gapAt(mid, target);
+        if ((gMid < 0) === (g0 < 0)) {
+          lo = mid;
+          g0 = gMid;
+        } else {
+          hi = mid;
+        }
+      }
+      crossings.push({ dateMs: (lo + hi) / 2, angle: target });
+    }
+  }
+  return crossings;
+}
+
+// ─── event composition ────────────────────────────────────────────────────────
+
+const MOON_PHASES: Record<number, string> = {
+  0:   "New Moon",
+  90:  "First Quarter",
+  180: "Full Moon",
+  270: "Last Quarter",
+};
+
+// Aspect names by folded separation; 90/270 both fold to the square, etc.
+const ASPECT_NAMES: Record<number, string> = {
+  0:   "conjunct",
+  90:  "square",
+  120: "trine",
+  180: "opposite",
+};
+const ASPECT_TARGETS = [0, 90, 120, 180, 240, 270] as const;
+
+function fold(angle: number): number {
+  return angle > 180 ? 360 - angle : angle;
 }
 
 function isoDate(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
-}
-
-// Longitude linearly interpolated along the *short* arc between two samples.
-function lerpLon(lon0: number, lon1: number, f: number): number {
-  const lon = lon0 + f * wrap180(lon1 - lon0);
-  return ((lon % 360) + 360) % 360;
-}
-
-const ORDINALS = [
-  "1st", "2nd", "3rd", "4th", "5th", "6th",
-  "7th", "8th", "9th", "10th", "11th", "12th",
-];
-
-export function houseTag(house: number): string {
-  return `${ORDINALS[house - 1]} house`;
 }
 
 function fmtDegSign(lon: number): string {
@@ -125,233 +238,48 @@ function fmtDegSign(lon: number): string {
   return `${signDegree.toFixed(1)}° ${sign}`;
 }
 
-function dedupe(tags: string[]): string[] {
-  return [...new Set(tags)];
-}
+export function scanEvents({ startDate, endDate, stepDays = 1 }: ScanInput): DetectedEvent[] {
+  const sampled = sampleLongitudes({ bodies: SKY_BODIES, startDate, endDate, stepDays });
+  if (sampled.length < 2) return [];
 
-// ─── scan ─────────────────────────────────────────────────────────────────────
-
-interface NatalTarget {
-  name: string;
-  longitude: number;
-  sign: string;
-  house: number;
-}
-
-interface Snapshot {
-  dateMs: number;                          // the sampled instant (noon UTC)
-  byBody: Map<string, PlanetPosition>;
-}
-
-function snapshotAt(natal: ChartData, dateMs: number): Snapshot {
-  const iso = new Date(dateMs).toISOString();
-  const transit: TransitData = computeTransitData({
-    natal,
-    targetDate: iso.slice(0, 10),
-    transitInstantUtc: iso,
-  });
-  return {
-    dateMs,
-    byBody: new Map(transit.transitingPositions.map(p => [p.body, p])),
-  };
-}
-
-export function scanEvents({ natal, startDate, endDate, stepDays = 1 }: ScanInput): DetectedEvent[] {
-  const startMs = Date.parse(`${startDate}T12:00:00Z`);
-  const endMs   = Date.parse(`${endDate}T12:00:00Z`);
-  if (Number.isNaN(startMs) || Number.isNaN(endMs)) {
-    throw new Error(`scanEvents: invalid date range ${startDate}..${endDate}`);
-  }
-  if (endMs <= startMs) return [];
-
-  const stepMs = stepDays * DAY_MS;
-  const natalCusps = [...natal.houses]
-    .sort((a, b) => a.house - b.house)
-    .map(h => h.longitude);
-  const chartRuler = chartRulerOf(natal);
-
-  // Aspect targets mirror computeTransitData's: natal planets + the angles.
-  const natalTargets: NatalTarget[] = [
-    ...natal.positions.map(p => ({
-      name: p.body, longitude: p.longitude, sign: p.sign, house: p.house,
-    })),
-    { name: "Ascendant", longitude: natal.ascendant,
-      sign: lonToSignInfo(natal.ascendant).sign, house: 1 },
-    { name: "Midheaven", longitude: natal.midheaven,
-      sign: lonToSignInfo(natal.midheaven).sign, house: 10 },
-  ];
+  const series = new Map<SkyBody, LongitudeSeries>(
+    SKY_BODIES.map(body => [body, bodySeries(body, sampled)])
+  );
 
   const events: DetectedEvent[] = [];
-  let prev = snapshotAt(natal, startMs);
 
-  for (let ms = startMs + stepMs; ms <= endMs; ms += stepMs) {
-    const curr = snapshotAt(natal, ms);
+  // Moon phases: Sun–Moon elongation crossing the four phase angles.
+  for (const c of findCrossings(series.get("Moon")!, series.get("Sun")!, [0, 90, 180, 270])) {
+    const phase = MOON_PHASES[c.angle];
+    const moonLon = longitudeAt("Moon", c.dateMs);
+    events.push({
+      date: isoDate(c.dateMs),
+      kind: "moon_phase",
+      bodies: ["Moon", "Sun"],
+      angle: c.angle,
+      label: `${phase} at ${fmtDegSign(moonLon)}`,
+      factors: ["Moon", "Sun"],
+    });
+  }
 
-    for (const [body, p1] of curr.byBody) {
-      const p0 = prev.byBody.get(body);
-      if (!p0) continue; // optional body (Chiron) missing from a step
-
-      // ── transit-to-natal aspects going exact ──────────────────────────────
-      if (!NATAL_CONTACT_EXCLUDED.has(body)) {
-        for (const target of natalTargets) {
-          const d0 = wrap180(p0.longitude - target.longitude);
-          const d1 = wrap180(p1.longitude - target.longitude);
-          for (const { type, angle } of ASPECT_ANGLES) {
-            // Exact when the separation hits +angle or −angle; both sides are
-            // distinct crossings except at 0°/180° where they coincide.
-            const sides = angle === 0 || angle === 180 ? [angle] : [angle, -angle];
-            for (const side of sides) {
-              const f = zeroCrossing(wrap180(d0 - side), wrap180(d1 - side));
-              if (f === null) continue;
-              const motion = p1.retrograde ? "retrograde" : "direct";
-              const isRuler = target.name === chartRuler;
-              events.push({
-                date: isoDate(prev.dateMs + f * stepMs),
-                kind: "transit-natal-aspect",
-                bodies: [body],
-                natalPoint: target.name,
-                house: target.house,
-                aspectType: type,
-                motion,
-                description:
-                  `Transiting ${body} ${type} natal ${target.name}` +
-                  (motion === "retrograde" ? " (retrograde pass)" : ""),
-                rawFactors: dedupe([
-                  body, target.name, type,
-                  houseTag(target.house), target.sign,
-                  p1.sign, houseTag(p1.house),
-                  ...(isRuler ? [CHART_RULER_TAG] : []),
-                ]),
-              });
-            }
-          }
-        }
-      }
-
-      // ── natal house ingress (daily precision is enough) ──────────────────
-      if (!HOUSE_INGRESS_EXCLUDED.has(body) && p0.house !== p1.house) {
+  // Major aspects between planet pairs (Moonless, see ASPECT_BODIES).
+  for (let i = 0; i < ASPECT_BODIES.length; i++) {
+    for (let j = i + 1; j < ASPECT_BODIES.length; j++) {
+      const nameA = ASPECT_BODIES[i];
+      const nameB = ASPECT_BODIES[j];
+      for (const c of findCrossings(series.get(nameA)!, series.get(nameB)!, ASPECT_TARGETS)) {
+        const folded = fold(c.angle);
+        const lonA = longitudeAt(nameA, c.dateMs);
         events.push({
-          date: isoDate(curr.dateMs),
-          kind: "natal-house-ingress",
-          bodies: [body],
-          house: p1.house,
-          motion: p1.retrograde ? "retrograde" : "direct",
-          description:
-            `${body} enters the natal ${houseTag(p1.house)}` +
-            (p1.retrograde ? " (retrograde)" : ""),
-          rawFactors: dedupe([body, houseTag(p1.house), p1.sign]),
-        });
-      }
-
-      // ── stations: longitude speed crossing zero ───────────────────────────
-      if (
-        !STATION_EXCLUDED.has(body) &&
-        p0.lonSpeed !== undefined && p1.lonSpeed !== undefined
-      ) {
-        const f = zeroCrossing(p0.lonSpeed, p1.lonSpeed);
-        if (f !== null) {
-          const stationLon = lerpLon(p0.longitude, p1.longitude, f);
-          const { sign } = lonToSignInfo(stationLon);
-          const house = assignHouse(stationLon, natalCusps);
-          const turning = p1.lonSpeed < 0 ? "retrograde" : "direct";
-          events.push({
-            date: isoDate(prev.dateMs + f * stepMs),
-            kind: "station",
-            bodies: [body],
-            house,
-            motion: turning,
-            description:
-              `${body} stations ${turning} at ${fmtDegSign(stationLon)} (natal ${houseTag(house)})`,
-            rawFactors: dedupe([body, sign, houseTag(house)]),
-          });
-        }
-      }
-
-      // ── outer-planet sign ingress ─────────────────────────────────────────
-      if (SIGN_INGRESS_BODIES.has(body) && p0.sign !== p1.sign) {
-        const direct = wrap180(p1.longitude - p0.longitude) >= 0;
-        // The boundary crossed: entering sign's cusp when direct, the exited
-        // sign's cusp when retrograde — same line, expressed from each side.
-        const boundary = direct
-          ? Math.floor(p1.longitude / 30) * 30
-          : Math.floor(p0.longitude / 30) * 30;
-        const f = zeroCrossing(
-          wrap180(p0.longitude - boundary),
-          wrap180(p1.longitude - boundary)
-        );
-        events.push({
-          date: isoDate(prev.dateMs + (f ?? 1) * stepMs),
-          kind: "sign-ingress",
-          bodies: [body],
-          motion: direct ? "direct" : "retrograde",
-          description:
-            `${body} enters ${p1.sign}` + (direct ? "" : " (retrograde)"),
-          rawFactors: dedupe([body, p1.sign]),
+          date: isoDate(c.dateMs),
+          kind: "aspect",
+          bodies: [nameA, nameB],
+          angle: folded,
+          label: `${nameA} ${ASPECT_NAMES[folded]} ${nameB} at ${fmtDegSign(lonA)}`,
+          factors: [nameA, nameB],
         });
       }
     }
-
-    // ── lunations: Sun–Moon elongation hitting 0° (new) or 180° (full) ──────
-    const sun0 = prev.byBody.get("Sun"), moon0 = prev.byBody.get("Moon");
-    const sun1 = curr.byBody.get("Sun"), moon1 = curr.byBody.get("Moon");
-    if (sun0 && moon0 && sun1 && moon1) {
-      const e0 = wrap180(moon0.longitude - sun0.longitude);
-      const e1 = wrap180(moon1.longitude - sun1.longitude);
-      for (const { phase, offset } of [
-        { phase: "New Moon" as const,  offset: 0 },
-        { phase: "Full Moon" as const, offset: 180 },
-      ]) {
-        const f = zeroCrossing(wrap180(e0 - offset), wrap180(e1 - offset));
-        if (f === null) continue;
-        const moonLon = lerpLon(moon0.longitude, moon1.longitude, f);
-        const { sign } = lonToSignInfo(moonLon);
-        const house = assignHouse(moonLon, natalCusps);
-        events.push({
-          date: isoDate(prev.dateMs + f * stepMs),
-          kind: "lunation",
-          bodies: ["Sun", "Moon"],
-          house,
-          aspectType: phase === "New Moon" ? "conjunction" : "opposition",
-          description:
-            `${phase} at ${fmtDegSign(moonLon)} (natal ${houseTag(house)})`,
-          // Deliberately NOT tagged with Moon/Sun: every lunation involves
-          // them, so those tags would let any Moon/Sun-flavored topic inflate
-          // all lunations equally. What distinguishes one lunation from
-          // another is its phase, sign, and natal house.
-          rawFactors: dedupe([phase, sign, houseTag(house)]),
-        });
-      }
-    }
-
-    // ── conjunctions between transiting planets ──────────────────────────────
-    const skyBodies = [...curr.byBody.keys()].filter(b => !SKY_CONJUNCTION_EXCLUDED.has(b));
-    for (let i = 0; i < skyBodies.length; i++) {
-      for (let j = i + 1; j < skyBodies.length; j++) {
-        const a0 = prev.byBody.get(skyBodies[i]), b0 = prev.byBody.get(skyBodies[j]);
-        const a1 = curr.byBody.get(skyBodies[i])!, b1 = curr.byBody.get(skyBodies[j])!;
-        if (!a0 || !b0) continue;
-        const f = zeroCrossing(
-          wrap180(a0.longitude - b0.longitude),
-          wrap180(a1.longitude - b1.longitude)
-        );
-        if (f === null) continue;
-        const lon = lerpLon(a0.longitude, a1.longitude, f);
-        const { sign } = lonToSignInfo(lon);
-        const house = assignHouse(lon, natalCusps);
-        events.push({
-          date: isoDate(prev.dateMs + f * stepMs),
-          kind: "sky-conjunction",
-          bodies: [skyBodies[i], skyBodies[j]],
-          house,
-          aspectType: "conjunction",
-          description:
-            `${skyBodies[i]} conjunct ${skyBodies[j]} at ${fmtDegSign(lon)} (natal ${houseTag(house)})`,
-          rawFactors: dedupe([skyBodies[i], skyBodies[j], sign, houseTag(house)]),
-        });
-      }
-    }
-
-    prev = curr;
   }
 
   events.sort((a, b) => a.date.localeCompare(b.date));

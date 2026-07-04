@@ -265,8 +265,8 @@ each event: what it is, and why it matters for their topic — nothing more.
 
 STRICT CONSTRAINTS — follow these without exception:
 1. You INTERPRET ONLY. Every event, its date, its bodies, and its aspects were computed for you.
-   Never add an event, drop an event, change a date, or mention any aspect, station, lunation, or
-   ingress that is not in the list. The list is the only ground truth about the upcoming sky.
+   Never add an event, drop an event, change a date, or mention any aspect or moon phase that is
+   not in the list. The list is the only ground truth about the upcoming sky.
 2. State each event's date exactly as given. If asked about a date or event not in the list, say
    the scan did not surface it rather than speculating.
 3. Ground the "why it matters" in the supplied natal chart facts and the event's own factors —
@@ -301,8 +301,8 @@ export function buildEventsInterpretationPrompt(
 
   lines.push("## Upcoming Events (deterministically detected and dated — ranked, strongest first)");
   events.forEach((e, i) => {
-    lines.push(`${i + 1}. ${e.date} — ${e.description}`);
-    lines.push(`   kind: ${e.kind}; factors: ${e.rawFactors.join(", ")}`);
+    lines.push(`${i + 1}. ${e.date} — ${e.label}`);
+    lines.push(`   kind: ${e.kind}; factors: ${e.factors.join(", ")}`);
   });
   lines.push("");
 

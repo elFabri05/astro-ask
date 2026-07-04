@@ -71,6 +71,9 @@ export async function findSignificantEvents(input: {
 }): Promise<EventsFindResult> {
   const { chartId, window, topic } = input;
 
+  // Sky-only detection needs no chart data, but the route is chart-scoped and
+  // the interpretation grounds events in this chart — so a missing chart must
+  // still 404 here rather than downstream.
   const chart = await getBirthChart(chartId);
   if (!chart) throw new ChartNotFoundError(`Chart not found: ${chartId}`);
 
@@ -80,7 +83,7 @@ export async function findSignificantEvents(input: {
   // Kick off the model call first; the scan is synchronous CPU work, so the
   // network round trip overlaps with it instead of following it.
   const factorsPromise = mapTopicToFactors(topic);
-  const detected = scanEvents({ natal: chart.chartData, startDate, endDate });
+  const detected = scanEvents({ startDate, endDate });
   const topicFactors = await factorsPromise;
 
   return {

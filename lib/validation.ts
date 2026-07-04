@@ -55,21 +55,15 @@ export type EventsFindInputType = z.infer<typeof EventsFindInput>;
 // client to the interpretation route. Mirrors RankedEvent (lib/events/find.ts)
 // — the interpretation may only ever see events that came out of the scan.
 export const RankedEventInput = z.object({
-  date:       z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  kind:       z.enum([
-    "transit-natal-aspect", "natal-house-ingress", "lunation",
-    "sky-conjunction", "station", "sign-ingress",
-  ]),
-  bodies:     z.array(z.string()).min(1),
-  natalPoint: z.string().optional(),
-  house:      z.number().int().min(1).max(12).optional(),
-  aspectType: z.string().optional(),
-  motion:     z.enum(["direct", "retrograde"]).optional(),
-  description: z.string().min(1),
-  rawFactors: z.array(z.string()),
-  strength:   z.number(),
-  relevance:  z.number(),
-  score:      z.number(),
+  date:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  kind:      z.enum(["moon_phase", "aspect"]),
+  bodies:    z.array(z.string()).min(1),
+  angle:     z.number(),
+  label:     z.string().min(1),
+  factors:   z.array(z.string()),
+  strength:  z.number(),
+  relevance: z.number(),
+  score:     z.number(),
 });
 
 export const EventsInterpretInput = z.object({

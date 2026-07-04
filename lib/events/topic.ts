@@ -4,28 +4,35 @@
 // The model never sees the chart, the window, or any event — it cannot claim
 // dates or placements, only name symbolism. Relevance itself (scoreRelevance)
 // is a deterministic overlap between those factors and each event's computed
-// rawFactors tags.
+// factors tags.
 
 import { generateText } from "ai";
 import { google } from "@ai-sdk/google";
 import { MODEL_ID } from "../interpret";
-import { houseTag, type DetectedEvent } from "./detect";
+import type { DetectedEvent } from "./detect";
 
 // ─── factor vocabulary ────────────────────────────────────────────────────────
 //
-// The closed set both sides speak: detection emits rawFactors from it (plus
-// aspect-type and chart-ruler tags scoring uses separately), and the topic
-// mapper may only pick from it — anything else the model outputs is dropped.
+// The closed set both sides speak: detection emits event factors from it and
+// the topic mapper may only pick from it — anything else the model outputs is
+// dropped. In sky-only mode detected events carry planet names only, so the
+// house/sign/point factors below never match anything; they are kept in the
+// vocabulary for when natal contacts return (fixed-longitude series over the
+// same crossing primitive), and matching them costs nothing meanwhile.
 
 const BODIES = [
   "Sun", "Moon", "Mercury", "Venus", "Mars", "Jupiter", "Saturn",
-  "Uranus", "Neptune", "Pluto", "True Node", "Chiron",
+  "Uranus", "Neptune", "Pluto",
 ];
 const SIGNS = [
   "Aries", "Taurus", "Gemini", "Cancer", "Leo", "Virgo",
   "Libra", "Scorpio", "Sagittarius", "Capricorn", "Aquarius", "Pisces",
 ];
-const HOUSES = Array.from({ length: 12 }, (_, i) => houseTag(i + 1));
+const ORDINALS = [
+  "1st", "2nd", "3rd", "4th", "5th", "6th",
+  "7th", "8th", "9th", "10th", "11th", "12th",
+];
+const HOUSES = ORDINALS.map(o => `${o} house`);
 const POINTS = ["Ascendant", "Midheaven"];
 const LUNATIONS = ["Full Moon", "New Moon"];
 
@@ -87,12 +94,12 @@ export async function mapTopicToFactors(topic: string): Promise<string[]> {
 
 // ─── deterministic relevance ──────────────────────────────────────────────────
 
-// How many of the topic's factors this event's computed tags hit. Plain
+// How many of the topic's factors this event's computed factors hit. Plain
 // intersection count — every match is one more reason the event speaks to
 // the topic, and rankEvents (lib/events/find.ts) turns that into a boost.
 export function scoreRelevance(event: DetectedEvent, topicFactors: string[]): number {
   if (topicFactors.length === 0) return 0;
-  const tags = new Set(event.rawFactors.map(f => f.toLowerCase()));
+  const tags = new Set(event.factors.map(f => f.toLowerCase()));
   let matches = 0;
   for (const factor of topicFactors) {
     if (tags.has(factor.toLowerCase())) matches++;

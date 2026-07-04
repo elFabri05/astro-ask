@@ -19,12 +19,8 @@ const TOPIC_SUGGESTIONS = [
 ];
 
 const KIND_LABELS: Record<RankedEvent["kind"], string> = {
-  "transit-natal-aspect": "Transit contact",
-  "natal-house-ingress":  "House ingress",
-  "lunation":             "Lunation",
-  "sky-conjunction":      "Conjunction",
-  "station":              "Station",
-  "sign-ingress":         "Sign ingress",
+  moon_phase: "Moon phase",
+  aspect:     "Planet aspect",
 };
 
 function cx(...classes: Array<string | false | undefined>): string {
@@ -256,9 +252,9 @@ export function EventFinder({ chartId }: Props) {
                       <span className={styles.eventDate}>{fmtDate(ev.date)}</span>
                       <span className={styles.eventKind}>{KIND_LABELS[ev.kind]}</span>
                     </div>
-                    <p className={styles.eventDesc}>{ev.description}</p>
+                    <p className={styles.eventDesc}>{ev.label}</p>
                     <div className={styles.eventFactors}>
-                      {ev.rawFactors.map(f => (
+                      {ev.factors.map(f => (
                         <span
                           key={f}
                           className={cx(
