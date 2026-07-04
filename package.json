@@ -11,6 +11,7 @@
     "verify:prompts": "tsx scripts/verify-prompts.ts",
     "verify:transits": "tsx scripts/verify-transits.ts",
     "verify:transit-prompt": "tsx scripts/verify-transit-prompt.ts",
+    "verify:events": "tsx scripts/verify-events.ts",
     "dev": "next dev",
     "build": "next build",
     "start": "next start"

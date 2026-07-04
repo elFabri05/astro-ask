@@ -1,0 +1,33 @@
+import { NextRequest, NextResponse } from "next/server";
+import { findSignificantEvents } from "@/lib/events/find";
+import { ChartNotFoundError } from "@/lib/transits";
+import { EventsFindInput } from "@/lib/validation";
+
+type Ctx = { params: { id: string } };
+
+// The deterministic half of the event finder: one topic-mapping model call,
+// then a pure ephemeris scan + ranking. Returns the ranked events as JSON so
+// the client can render them immediately and stream the interpretation
+// separately (see ./interpret/route.ts).
+export async function POST(req: NextRequest, { params }: Ctx) {
+  const body = await req.json().catch(() => null);
+  const parsed = EventsFindInput.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error.flatten().fieldErrors }, { status: 400 });
+  }
+
+  try {
+    const result = await findSignificantEvents({
+      chartId: params.id,
+      window:  parsed.data.window,
+      topic:   parsed.data.topic,
+    });
+    return NextResponse.json(result);
+  } catch (err) {
+    if (err instanceof ChartNotFoundError) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    console.error("[POST /api/charts/:id/events]", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}

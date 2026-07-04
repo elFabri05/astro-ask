@@ -212,6 +212,7 @@ export function computeTransitData(input: {
       signDegree,
       house: assignHouse(lon, natalCusps), // natal house, not a recomputed one
       retrograde: lonSpd < 0,
+      lonSpeed: lonSpd,
     });
   }
 

@@ -1,0 +1,336 @@
+.finder {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* ─── search form ─────────────────────────────────────────────────────────────── */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.topicRow {
+  display: flex;
+  gap: 0.625rem;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 0.5rem 0.5rem 0.5rem 1rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.topicRow:focus-within {
+  border-color: var(--border-focus);
+}
+
+.topicInput {
+  flex: 1;
+  border: none;
+  outline: none;
+  font-size: 0.9375rem;
+  color: var(--text);
+  background: transparent;
+}
+
+.topicInput::placeholder {
+  color: var(--text-muted);
+}
+
+.findBtn {
+  padding: 0.5rem 1.1rem;
+  background: var(--accent);
+  color: var(--accent-text);
+  border: none;
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition), opacity var(--transition);
+}
+
+.findBtn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.findBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.optionsRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.windowGroup {
+  display: inline-flex;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.windowBtn {
+  padding: 0.35rem 0.9rem;
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.windowBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.windowBtnActive {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.chip {
+  padding: 0.4rem 0.8rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color var(--transition), color var(--transition);
+  white-space: nowrap;
+}
+
+.chip:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.chip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ─── states ──────────────────────────────────────────────────────────────────── */
+
+.error {
+  padding: 0.75rem 1rem;
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  border-radius: var(--radius);
+  color: var(--error);
+  font-size: 0.875rem;
+}
+
+.scanning {
+  padding: 2rem 1rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+}
+
+.empty {
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+}
+
+/* ─── results ─────────────────────────────────────────────────────────────────── */
+
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.resultsMeta {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  flex-wrap: wrap;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+.factorList {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.375rem;
+  flex-wrap: wrap;
+}
+
+.factorTag {
+  padding: 0.1rem 0.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  color: var(--text);
+}
+
+.eventList {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.eventCard {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: start;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1rem 1.25rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.eventRank {
+  width: 1.75rem;
+  height: 1.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.eventBody {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.eventHead {
+  display: flex;
+  align-items: baseline;
+  gap: 0.625rem;
+  flex-wrap: wrap;
+}
+
+.eventDate {
+  font-weight: 600;
+  font-size: 0.9375rem;
+  color: var(--text);
+}
+
+.eventKind {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.eventDesc {
+  font-size: 0.9375rem;
+  color: var(--text);
+}
+
+.eventFactors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.eventFactor {
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.eventFactorMatched {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.openTransit {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+  white-space: nowrap;
+  align-self: center;
+}
+
+.openTransit:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+@media (max-width: 640px) {
+  .eventCard {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .openTransit {
+    grid-column: 2;
+    justify-self: start;
+    align-self: auto;
+  }
+}
+
+/* ─── streamed reading ────────────────────────────────────────────────────────── */
+
+.reading {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem 1.5rem;
+  line-height: 1.75;
+  font-size: 0.9375rem;
+  color: var(--text);
+}
+
+.reading p {
+  margin: 0 0 0.85em;
+}
+
+.reading p:last-of-type {
+  margin-bottom: 0;
+}
+
+.typing {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  height: 1em;
+}
+
+.typing span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  animation: pulse 1.2s infinite ease-in-out;
+}
+
+.typing span:nth-child(2) { animation-delay: 0.15s; }
+.typing span:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes pulse {
+  0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
+}

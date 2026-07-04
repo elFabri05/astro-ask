@@ -1,5 +1,6 @@
 import type { ChartData } from "./ephemeris";
 import type { TransitData } from "./transits";
+import type { RankedEvent } from "./events/find";
 
 // ─── system prompt ────────────────────────────────────────────────────────────
 
@@ -247,6 +248,67 @@ export function buildTransitContext(natal: ChartData, transit: TransitData): str
   lines.push(...formatSkyFacts(transit));
   lines.push("");
   lines.push(...formatPersonalFacts(natal, transit));
+
+  return lines.join("\n");
+}
+
+// ─── event-finder interpretation ──────────────────────────────────────────────
+//
+// The events below were detected and dated deterministically (lib/events) —
+// the model's only job here is to explain them. Same interpret-only grounding
+// as the natal and transit prompts, plus a hard rule against touching dates.
+
+export function buildEventsSystemPrompt(): string {
+  return `You are a skilled astrologer. A deterministic scan of the upcoming sky has already found
+and dated the significant astrological events for this person's question. Your role is to explain
+each event: what it is, and why it matters for their topic — nothing more.
+
+STRICT CONSTRAINTS — follow these without exception:
+1. You INTERPRET ONLY. Every event, its date, its bodies, and its aspects were computed for you.
+   Never add an event, drop an event, change a date, or mention any aspect, station, lunation, or
+   ingress that is not in the list. The list is the only ground truth about the upcoming sky.
+2. State each event's date exactly as given. If asked about a date or event not in the list, say
+   the scan did not surface it rather than speculating.
+3. Ground the "why it matters" in the supplied natal chart facts and the event's own factors —
+   name the natal placements and houses involved, never invented ones.
+4. The facts are given fresh in every call. You have no memory of prior charts or scans.
+
+WRITE THE READING AS FOLLOWS:
+- Open with one short paragraph tying the season ahead to their topic.
+- Then cover EVERY listed event, in the order given (they are ranked most significant first).
+  For each: a bold heading line with the date and the event, then one compact paragraph — what
+  the event is (briefly, for a general reader) and why it speaks to their topic through their
+  chart. Mention the timing plainly ("around June 12") using the given date.
+- Close with one or two sentences on the overall arc. No advice disclaimers, no raw data dumps.`.trimStart();
+}
+
+export function buildEventsInterpretationPrompt(
+  natal: ChartData,
+  topic: string,
+  topicFactors: string[],
+  events: RankedEvent[]
+): string {
+  const lines: string[] = [];
+
+  lines.push("The following facts are computed values. Treat them as the only ground truth.");
+  lines.push("");
+  lines.push(`## The Person's Topic`);
+  lines.push(topic);
+  lines.push("");
+  lines.push(`## Chart Factors Mapped To The Topic`);
+  lines.push(topicFactors.length > 0 ? topicFactors.join(", ") : "(none mapped)");
+  lines.push("");
+
+  lines.push("## Upcoming Events (deterministically detected and dated — ranked, strongest first)");
+  events.forEach((e, i) => {
+    lines.push(`${i + 1}. ${e.date} — ${e.description}`);
+    lines.push(`   kind: ${e.kind}; factors: ${e.rawFactors.join(", ")}`);
+  });
+  lines.push("");
+
+  lines.push(...formatNatalFacts(natal));
+  lines.push("");
+  lines.push("Write the reading now: explain each listed event, in order, with its exact date.");
 
   return lines.join("\n");
 }

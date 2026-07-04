@@ -3,7 +3,7 @@ import styles from "./ChartModeToggle.module.css";
 
 interface Props {
   chartId: string;
-  active: "natal" | "transits";
+  active: "natal" | "transits" | "events";
 }
 
 function cx(...classes: Array<string | false | undefined>): string {
@@ -28,6 +28,14 @@ export function ChartModeToggle({ chartId, active }: Props) {
         className={cx(styles.item, active === "transits" && styles.itemActive)}
       >
         Transits
+      </Link>
+      <Link
+        href={`/chart/${chartId}/events`}
+        role="tab"
+        aria-selected={active === "events"}
+        className={cx(styles.item, active === "events" && styles.itemActive)}
+      >
+        Events
       </Link>
     </div>
   );

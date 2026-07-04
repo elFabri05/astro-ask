@@ -45,6 +45,9 @@ export interface PlanetPosition {
   signDegree: number;
   house: number;
   retrograde: boolean;
+  // Longitude speed in °/day. Optional: chart/transit JSON cached before this
+  // field existed lacks it; freshly computed positions always carry it.
+  lonSpeed?: number;
 }
 
 export interface HouseCusp {
@@ -138,6 +141,7 @@ export function computeNatalChart(input: {
       signDegree,
       house: 0, // assigned below once cusps are known
       retrograde: lonSpd < 0,
+      lonSpeed: lonSpd,
     });
   }
 
