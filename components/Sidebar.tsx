@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { BirthChartSummary } from "@/lib/charts";
+import { ConfirmDialog } from "./ConfirmDialog";
 import styles from "./Sidebar.module.css";
 
 interface Props {
@@ -22,14 +23,15 @@ export function Sidebar({ charts }: Props) {
   const pathname = usePathname();
   const router   = useRouter();
   const [open, setOpen]       = useState(false);
+  const [confirmChart, setConfirmChart] = useState<BirthChartSummary | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const activeId = pathname.match(/^\/chart\/([^/]+)/)?.[1];
 
-  async function handleDelete(chart: BirthChartSummary) {
-    if (!window.confirm(`Delete "${chartLabel(chart)}"? This removes its readings and chat history too.`)) {
-      return;
-    }
+  async function handleConfirmedDelete() {
+    const chart = confirmChart;
+    if (!chart) return;
+    setConfirmChart(null);
 
     setDeletingId(chart.id);
     try {
@@ -89,7 +91,7 @@ export function Sidebar({ charts }: Props) {
                 <button
                   type="button"
                   className={styles.deleteBtn}
-                  onClick={() => handleDelete(chart)}
+                  onClick={() => setConfirmChart(chart)}
                   disabled={deletingId === chart.id}
                   aria-label={`Delete ${chartLabel(chart)}`}
                   title="Delete chart"
@@ -101,6 +103,21 @@ export function Sidebar({ charts }: Props) {
           )}
         </nav>
       </aside>
+
+      {confirmChart && (
+        <ConfirmDialog
+          title="Delete chart?"
+          message={
+            <>
+              This permanently removes <strong>“{chartLabel(confirmChart)}”</strong> along with its
+              readings and chat history.
+            </>
+          }
+          confirmLabel="Delete"
+          onConfirm={handleConfirmedDelete}
+          onCancel={() => setConfirmChart(null)}
+        />
+      )}
     </>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { ConfirmDialog } from "./ConfirmDialog";
 import styles from "./SessionStack.module.css";
 
 // Serialized ChartSessionEntry (see lib/sessions.ts) — dates arrive as Date
@@ -74,6 +75,7 @@ function cx(...classes: Array<string | false | undefined>): string {
 // meta). Clicking a card reopens that conversation in its own context.
 export function SessionStack({ chartId, entries, activeSessionId, onSelect, onDeleted, busy }: Props) {
   const router = useRouter();
+  const [confirmEntry, setConfirmEntry] = useState<SessionStackEntry | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   function handleClick(entry: SessionStackEntry) {
@@ -82,12 +84,14 @@ export function SessionStack({ chartId, entries, activeSessionId, onSelect, onDe
     else router.push(sessionHref(chartId, entry));
   }
 
-  // Same confirm→delete→reroute pattern as chart-delete in the Sidebar. Only
-  // the Session and its messages go; the transit and its cached reading are
-  // shared with sibling sessions and survive.
-  async function handleDelete(entry: SessionStackEntry) {
-    const label = entry.title ?? "New conversation";
-    if (!window.confirm(`Delete "${label}"? This removes its messages too.`)) return;
+  // Same confirm→delete→reroute pattern as chart-delete in the Sidebar,
+  // confirmed via the in-app ConfirmDialog. Only the Session and its messages
+  // go; the transit and its cached reading are shared with sibling sessions
+  // and survive.
+  async function handleConfirmedDelete() {
+    const entry = confirmEntry;
+    if (!entry) return;
+    setConfirmEntry(null);
 
     setDeletingId(entry.id);
     try {
@@ -147,7 +151,7 @@ export function SessionStack({ chartId, entries, activeSessionId, onSelect, onDe
                 <button
                   type="button"
                   className={styles.deleteBtn}
-                  onClick={() => handleDelete(entry)}
+                  onClick={() => setConfirmEntry(entry)}
                   disabled={busy || isDeleting}
                   aria-label={`Delete conversation "${entry.title ?? "New conversation"}"`}
                   title="Delete conversation"
@@ -158,6 +162,21 @@ export function SessionStack({ chartId, entries, activeSessionId, onSelect, onDe
             );
           })}
         </ol>
+      )}
+
+      {confirmEntry && (
+        <ConfirmDialog
+          title="Delete conversation?"
+          message={
+            <>
+              This permanently removes <strong>“{confirmEntry.title ?? "New conversation"}”</strong>{" "}
+              and its {confirmEntry.messageCount} message{confirmEntry.messageCount === 1 ? "" : "s"}.
+            </>
+          }
+          confirmLabel="Delete"
+          onConfirm={handleConfirmedDelete}
+          onCancel={() => setConfirmEntry(null)}
+        />
       )}
     </nav>
   );
