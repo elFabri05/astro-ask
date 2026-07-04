@@ -9,12 +9,18 @@
 //      famous planet aspect (Jupiter conjunct Uranus, 2024-04-20/21).
 //   2. scoreStrength ranks an outer-planet aspect above a fast-planet one.
 //   3. rankEvents returns a short, strongest-first list.
+//   4. mapTopicToFactors is a deterministic lookup: career topics map to
+//      career factors, unmatched topics fall back to DEFAULT_FACTORS (never
+//      empty), the table only uses vocabulary factors, and repeated rapid
+//      calls are instant and identical (no model, no quota).
 //
 // Run: npm run verify:events
 
 import { scanEvents, type DetectedEvent } from "../lib/events/detect";
 import { scoreStrength } from "../lib/events/score";
 import { rankEvents } from "../lib/events/find";
+import { mapTopicToFactors, FACTOR_VOCABULARY } from "../lib/events/topic";
+import { TOPIC_TABLE, DEFAULT_FACTORS } from "../lib/events/topicTable";
 
 let failures = 0;
 
@@ -117,6 +123,39 @@ function main() {
   check("returns a short ranked list", ranked.length > 0 && ranked.length <= 5);
   check("ranked strongest-first",
     ranked.every((e, i) => i === 0 || ranked[i - 1].score >= e.score));
+
+  console.log();
+  console.log("─".repeat(64));
+  console.log("  Step 4 — deterministic topic mapping (no model, no quota)");
+  console.log("─".repeat(64));
+
+  const career = mapTopicToFactors("my career");
+  console.log(`  "my career" → ${JSON.stringify(career)}`);
+  check("career topic maps to career factors",
+    ["Saturn", "Sun", "Midheaven", "10th house"].every(f => career.includes(f)));
+
+  const iguana = mapTopicToFactors("my pet iguana");
+  console.log(`  "my pet iguana" → ${JSON.stringify(iguana)}`);
+  check("unmatched topic falls back to DEFAULT_FACTORS (never empty)",
+    iguana.length > 0 &&
+    iguana.length === DEFAULT_FACTORS.length &&
+    DEFAULT_FACTORS.every(f => iguana.includes(f)));
+
+  check("empty topic also falls back, never []",
+    mapTopicToFactors("").length > 0);
+
+  check("table only uses factors from the closed vocabulary",
+    TOPIC_TABLE.every(e => e.factors.every(f => FACTOR_VOCABULARY.includes(f))) &&
+    DEFAULT_FACTORS.every(f => FACTOR_VOCABULARY.includes(f)));
+
+  // The mapping stage can no longer rate-limit: hammer it and require
+  // identical, effectively-instant results every time.
+  const tMap = Date.now();
+  const repeats = Array.from({ length: 1000 }, () => mapTopicToFactors("my career"));
+  const mapMs = Date.now() - tMap;
+  check("1000 rapid calls: identical results, no network",
+    repeats.every(r => JSON.stringify(r) === JSON.stringify(career)),
+    `${mapMs}ms total`);
 
   console.log();
   if (failures > 0) {

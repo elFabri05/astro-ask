@@ -27,6 +27,8 @@ export async function POST(req: NextRequest, { params }: Ctx) {
   }
 
   try {
+    // The one remaining model call in the events pipeline — and therefore the
+    // only stage that can still hit the provider's quota/rate limits.
     const result = streamText({
       model:  google(MODEL_ID),
       system: buildEventsSystemPrompt(),

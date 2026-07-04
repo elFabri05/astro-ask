@@ -1,24 +1,22 @@
-// Topic handling for the event finder. Exactly one model call lives here:
-// mapTopicToFactors turns free text ("my career") into astrological factors
-// ("10th house", "Saturn", "Midheaven", ...) drawn from a closed vocabulary.
-// The model never sees the chart, the window, or any event — it cannot claim
-// dates or placements, only name symbolism. Relevance itself (scoreRelevance)
-// is a deterministic overlap between those factors and each event's computed
-// factors tags.
+// Topic handling for the event finder — fully deterministic. mapTopicToFactors
+// turns free text ("my career") into astrological factors ("Saturn",
+// "10th house", ...) by keyword lookup against the association table in
+// lib/events/topicTable.ts: no model, no network, no quota, no async. The
+// only model call left in the whole pipeline is the interpretation itself.
+// Relevance (scoreRelevance) is a deterministic overlap between those factors
+// and each event's computed factors tags.
 
-import { generateText } from "ai";
-import { google } from "@ai-sdk/google";
-import { MODEL_ID } from "../interpret";
+import { TOPIC_TABLE, DEFAULT_FACTORS } from "./topicTable";
 import type { DetectedEvent } from "./detect";
 
 // ─── factor vocabulary ────────────────────────────────────────────────────────
 //
 // The closed set both sides speak: detection emits event factors from it and
-// the topic mapper may only pick from it — anything else the model outputs is
-// dropped. In sky-only mode detected events carry planet names only, so the
-// house/sign/point factors below never match anything; they are kept in the
-// vocabulary for when natal contacts return (fixed-longitude series over the
-// same crossing primitive), and matching them costs nothing meanwhile.
+// the topic table may only use factors from it (verified in
+// scripts/verify-events.ts). In sky-only mode detected events carry planet
+// names only, so the house/sign/point factors never match anything; they are
+// kept for when natal contacts return (fixed-longitude series over the same
+// crossing primitive), and matching them costs nothing meanwhile.
 
 const BODIES = [
   "Sun", "Moon", "Mercury", "Venus", "Mars", "Jupiter", "Saturn",
@@ -40,56 +38,43 @@ export const FACTOR_VOCABULARY: readonly string[] = [
   ...BODIES, ...SIGNS, ...HOUSES, ...POINTS, ...LUNATIONS,
 ];
 
-// lowercase → canonical spelling, for tolerant parsing of model output
-const CANONICAL = new Map(FACTOR_VOCABULARY.map(f => [f.toLowerCase(), f]));
+// ─── deterministic topic mapping ──────────────────────────────────────────────
 
-// ─── the one pre-scan model call ─────────────────────────────────────────────
-
-function buildTopicSystemPrompt(): string {
-  return `You are an expert astrologer. Given a life topic, list the astrological factors
-traditionally associated with it: relevant houses, planets, signs, and points.
-
-STRICT CONSTRAINTS — follow these without exception:
-1. Choose ONLY from this exact vocabulary (case-sensitive spellings):
-${FACTOR_VOCABULARY.map(f => `   - ${f}`).join("\n")}
-2. Output ONLY a JSON array of 4 to 10 strings, e.g. ["10th house","Saturn","Midheaven"].
-   No prose, no markdown fences, no keys, no explanations.
-3. Never output dates, events, predictions, or claims about any person's chart —
-   you are mapping the SYMBOLISM of the topic, nothing else.
-
-Examples of the shape (not content to copy):
-- "career" → ["10th house","Saturn","Midheaven","Capricorn","Sun","6th house"]
-- "a relationship" → ["7th house","Venus","Mars","Libra","5th house","Moon"]`.trimStart();
+// Stem-tolerant prefix match between a topic token and a table keyword:
+// "promoted" matches keyword "promotion"? No — but "promotions" does, and
+// token "studying" matches keyword "study". The length guards keep short
+// fragments ("ma", "lo") from matching half the table.
+function tokenMatchesKeyword(token: string, keyword: string): boolean {
+  if (token === keyword) return true;
+  if (keyword.length >= 3 && token.startsWith(keyword)) return true;
+  if (token.length >= 4 && keyword.startsWith(token)) return true;
+  return false;
 }
 
-// Map a free-text topic to factor tags. Unknown factors from the model are
-// silently dropped; if nothing valid survives, the caller ranks by strength
-// alone rather than failing the whole scan.
-export async function mapTopicToFactors(topic: string): Promise<string[]> {
-  const { text } = await generateText({
-    model:  google(MODEL_ID),
-    system: buildTopicSystemPrompt(),
-    prompt: `Topic: ${topic}\n\nOutput the JSON array now.`,
-  });
+// Map a free-text topic to factor tags — synchronous and deterministic.
+// Union of the factors of every matched table entry; a topic that matches
+// nothing falls back to DEFAULT_FACTORS, never [] (an empty set would make
+// every event score zero relevance and the ranking meaningless).
+export function mapTopicToFactors(topic: string): string[] {
+  const tokens = topic.toLowerCase().split(/[^a-z]+/).filter(Boolean);
 
-  // Tolerate a fenced or prefixed reply: take the first [...] block.
-  const match = text.match(/\[[\s\S]*?\]/);
-  if (!match) return [];
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(match[0]);
-  } catch {
-    return [];
+  const matched = new Set<string>();
+  for (const entry of TOPIC_TABLE) {
+    const hit = entry.keywords.some(keyword =>
+      tokens.some(token => tokenMatchesKeyword(token, keyword))
+    );
+    if (hit) for (const factor of entry.factors) matched.add(factor);
   }
-  if (!Array.isArray(parsed)) return [];
 
-  const factors = parsed
-    .filter((f): f is string => typeof f === "string")
-    .map(f => CANONICAL.get(f.trim().toLowerCase()))
-    .filter((f): f is string => f !== undefined);
+  if (matched.size === 0) {
+    // SEAM: this is the single place a smarter fallback for unmatched topics
+    // (a model call, an embedding lookup) would slot in later. Deliberately
+    // NOT implemented — the broad default keeps the scan deterministic and
+    // quota-free, returning the strongest events topic-unfiltered.
+    return [...DEFAULT_FACTORS];
+  }
 
-  return [...new Set(factors)];
+  return [...matched];
 }
 
 // ─── deterministic relevance ──────────────────────────────────────────────────

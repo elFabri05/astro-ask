@@ -1,8 +1,8 @@
-// Orchestration for the event finder: resolve the window, run the one
-// topic-mapping model call, scan the window deterministically, rank, and
-// return the top few events with their computed dates and scores. No
-// interpretation happens here — the ranked result is handed to the
-// interpretation route as ground truth.
+// Orchestration for the event finder: resolve the window, map the topic to
+// factors (deterministic table lookup), scan the window deterministically,
+// rank, and return the top few events with their computed dates and scores.
+// Nothing here touches a model or the network — interpretation is a separate
+// route that receives the ranked result as ground truth.
 
 import { getBirthChart } from "../charts";
 import { ChartNotFoundError } from "../transits";
@@ -80,11 +80,8 @@ export async function findSignificantEvents(input: {
   const startDate = todayUtc();
   const endDate = addMonthsUtc(startDate, WINDOW_MONTHS[window]);
 
-  // Kick off the model call first; the scan is synchronous CPU work, so the
-  // network round trip overlaps with it instead of following it.
-  const factorsPromise = mapTopicToFactors(topic);
+  const topicFactors = mapTopicToFactors(topic); // pure lookup — cannot fail or rate-limit
   const detected = scanEvents({ startDate, endDate });
-  const topicFactors = await factorsPromise;
 
   return {
     chartId,

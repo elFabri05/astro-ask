@@ -3,12 +3,13 @@
 // today, so whichever stage throws is obvious — with its real message and
 // stack — and stage (b) shows what the deterministic compute actually costs.
 //
-//   a) mapTopicToFactors("my career")   — one model call (skipped w/o key)
+//   a) mapTopicToFactors("my career")   — deterministic table lookup (~0ms)
 //   b) sampleLongitudes                 — the daily ephemeris sweep
 //   c) scanEvents                       — crossings → dated events
 //   d) score + rank                     — the top-5 list
 //   e) interpretation prompt / call     — prompt always; model only if
-//                                         --interpret is passed (quota!)
+//                                         --interpret is passed (the one
+//                                         remaining quota-limited stage)
 //
 // Run: npm run diagnose:events [-- --interpret]
 
@@ -45,23 +46,15 @@ async function main() {
   console.log(`Window: ${startDate} → ${endDate} (3 months), model: ${MODEL_ID}`);
 
   // ── a) topic mapping ────────────────────────────────────────────────────────
-  stage("a) mapTopicToFactors(\"" + TOPIC + "\")");
-  let topicFactors: string[] = ["10th house", "Saturn", "Midheaven", "Sun"];
-  if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
-    console.log("  skipped: GOOGLE_GENERATIVE_AI_API_KEY not set");
-    console.log(`  using fallback factors so later stages still run: ${JSON.stringify(topicFactors)}`);
-  } else {
+  stage("a) mapTopicToFactors(\"" + TOPIC + "\") — deterministic, no network");
+  let topicFactors: string[] = [];
+  try {
     const t = Date.now();
-    try {
-      topicFactors = await mapTopicToFactors(TOPIC);
-      console.log(`  ok in ${Date.now() - t}ms → ${JSON.stringify(topicFactors)}`);
-      if (topicFactors.length === 0) {
-        console.log("  ⚠ parsed to an empty list — the model reply didn't contain a valid JSON array");
-      }
-    } catch (err) {
-      fail(err);
-      console.log(`  continuing with fallback factors: ${JSON.stringify(topicFactors)}`);
-    }
+    topicFactors = mapTopicToFactors(TOPIC);
+    console.log(`  ok in ${Date.now() - t}ms (pure table lookup, no model, no quota) → ${JSON.stringify(topicFactors)}`);
+  } catch (err) {
+    fail(err);
+    process.exit(1); // a pure lookup throwing means the table itself is broken
   }
 
   // ── b) longitude sampling ───────────────────────────────────────────────────
