@@ -9,31 +9,41 @@ import {
   type ChartData,
 } from "./ephemeris";
 import { computeAspects, type Aspect, type AspectBody, type AspectOrbConfig } from "./aspects";
-import { getBirthChart } from "./charts";
+import { getBirthChart, type BirthChartRecord } from "./charts";
 import { resolveUtcInstant, type ResolvedPlace } from "./geo";
 import { prisma } from "./db";
 import { Prisma } from "@prisma/client";
 
 // Tighter than natal orbs, on purpose — a transit hit should mean something.
 const TRANSIT_ORBS: readonly AspectOrbConfig[] = [
-  { type: "conjunction", angle: 0,   orb: 3 },
-  { type: "opposition",  angle: 180, orb: 3 },
-  { type: "square",      angle: 90,  orb: 3 },
-  { type: "trine",       angle: 120, orb: 3 },
-  { type: "sextile",     angle: 60,  orb: 2 },
+  { type: "conjunction", angle: 0,   orb: 6 },
+  { type: "opposition",  angle: 180, orb: 6 },
+  { type: "square",      angle: 90,  orb: 6 },
+  { type: "trine",       angle: 120, orb: 6 },
+  { type: "sextile",     angle: 60,  orb: 5 },
 ];
 
 export class ChartNotFoundError extends Error {}
 
 // ─── interfaces ───────────────────────────────────────────────────────────────
 
-export interface TransitData {
+// What actually gets persisted. Only the inputs to aspect detection are
+// stored — never the aspects themselves. Aspects are a pure function of the
+// transiting positions + the natal chart + TRANSIT_ORBS (no ephemeris call),
+// so they're recomputed on every read (see parseTransitData). That way an
+// orb-config change takes effect immediately instead of being frozen into
+// rows written under the old orbs.
+export interface StoredTransitData {
   targetDate: string;
   transitInstant: string;              // ISO UTC noon
   transitingPositions: PlanetPosition[]; // `house` = natal house occupied
+  meta: { ephemeris: "swieph" | "moseph" };
+}
+
+// The hydrated shape callers see: stored inputs plus the derived aspects.
+export interface TransitData extends StoredTransitData {
   transitToTransitAspects: Aspect[];   // the sky's own configuration — both bodies transiting
   transitToNatalAspects: Aspect[];     // body1 = transiting, body2 = natal
-  meta: { ephemeris: "swieph" | "moseph" };
 }
 
 export interface TransitChartRecord {
@@ -89,26 +99,49 @@ function jdUtFromIso(isoUtc: string): number {
   return jd_ut;
 }
 
-// Old cached rows (written before transit-to-transit aspects were tracked)
-// lack transitToTransitAspects. It's derivable from transitingPositions
-// alone (no natal chart or ephemeris call needed), so backfill it in memory
-// on read rather than forcing a data migration or a cache reset.
-function parseTransitData(raw: string): TransitData {
-  const data = JSON.parse(raw) as TransitData;
-  if (!data.transitToTransitAspects) {
-    data.transitToTransitAspects = computeAspects(
-      data.transitingPositions, data.transitingPositions, TRANSIT_ORBS
-    );
-  }
-  return data;
+// The single source of truth for how transit aspects are derived. Both sets
+// are a pure function of the transiting positions + the natal chart against
+// TRANSIT_ORBS — no ephemeris call — used both when first building a chart and
+// when hydrating a cached row on read.
+function computeTransitAspects(
+  transitingPositions: PlanetPosition[],
+  natal: ChartData
+): Pick<TransitData, "transitToTransitAspects" | "transitToNatalAspects"> {
+  // Aspect targets: natal planets plus the natal angles.
+  const natalTargets: AspectBody[] = [
+    ...natal.positions.map(p => ({ body: p.body, longitude: p.longitude })),
+    { body: "Ascendant", longitude: natal.ascendant },
+    { body: "Midheaven", longitude: natal.midheaven },
+  ];
+  return {
+    // The sky's own configuration — transiting planets aspecting each other,
+    // independent of any individual chart. computeAspects handles the self-set
+    // dedup (skip self-pairs and A–B/B–A duplicates).
+    transitToTransitAspects: computeAspects(transitingPositions, transitingPositions, TRANSIT_ORBS),
+    transitToNatalAspects:   computeAspects(transitingPositions, natalTargets, TRANSIT_ORBS),
+  };
+}
+
+// Drops the derived aspects before persisting — only inputs are cached.
+function toStored(d: TransitData): StoredTransitData {
+  const { targetDate, transitInstant, transitingPositions, meta } = d;
+  return { targetDate, transitInstant, transitingPositions, meta };
+}
+
+// Cached rows store only StoredTransitData — aspects are recomputed here
+// against the current natal chart + TRANSIT_ORBS. Any aspect fields left on an
+// older row are parsed away by the StoredTransitData cast and ignored.
+function parseTransitData(raw: string, natal: ChartData): TransitData {
+  const stored = JSON.parse(raw) as StoredTransitData;
+  return { ...stored, ...computeTransitAspects(stored.transitingPositions, natal) };
 }
 
 function toRecord(row: {
   id: string; chartId: string; transitInstantUtc: string; latitude: number; longitude: number;
   targetDate: string; localTime: string | null; timezone: string | null; placeLabel: string | null;
   transitData: string; createdAt: Date;
-}): TransitChartRecord {
-  return { ...row, transitData: parseTransitData(row.transitData) };
+}, natal: ChartData): TransitChartRecord {
+  return { ...row, transitData: parseTransitData(row.transitData, natal) };
 }
 
 // Resolves a (date, time?, place?) input down to the exact instant + location
@@ -212,30 +245,14 @@ export function computeTransitData(input: {
       signDegree,
       house: assignHouse(lon, natalCusps), // natal house, not a recomputed one
       retrograde: lonSpd < 0,
-      lonSpeed: lonSpd,
     });
   }
-
-  // The sky's own configuration — transiting planets aspecting each other,
-  // independent of any individual chart. Same self-set dedup as the natal
-  // chart's internal aspects (skip self-pairs and A–B/B–A duplicates).
-  const transitToTransitAspects = computeAspects(transitingPositions, transitingPositions, TRANSIT_ORBS);
-
-  // Aspect targets: natal planets plus the natal angles.
-  const natalTargets: AspectBody[] = [
-    ...natal.positions.map(p => ({ body: p.body, longitude: p.longitude })),
-    { body: "Ascendant", longitude: natal.ascendant },
-    { body: "Midheaven", longitude: natal.midheaven },
-  ];
-
-  const transitToNatalAspects = computeAspects(transitingPositions, natalTargets, TRANSIT_ORBS);
 
   return {
     targetDate,
     transitInstant: transitInstantUtc,
     transitingPositions,
-    transitToTransitAspects,
-    transitToNatalAspects,
+    ...computeTransitAspects(transitingPositions, natal),
     meta: { ephemeris: EPHEMERIS_MODE },
   };
 }
@@ -260,12 +277,20 @@ export async function findTransitChart(
       },
     },
   });
-  return row ? toRecord(row) : null;
+  if (!row) return null;
+  // Aspects are recomputed on read, so hydration needs the natal chart.
+  // resolveTransitTarget already proved it exists (throws otherwise).
+  const chart = await getBirthChart(chartId);
+  if (!chart) throw new ChartNotFoundError(`Chart not found: ${chartId}`);
+  return toRecord(row, chart.chartData);
 }
 
 export async function getTransitChartById(id: string): Promise<TransitChartRecord | null> {
   const row = await prisma.transitChart.findUnique({ where: { id } });
-  return row ? toRecord(row) : null;
+  if (!row) return null;
+  const chart = await getBirthChart(row.chartId);
+  if (!chart) throw new ChartNotFoundError(`Chart not found: ${row.chartId}`);
+  return toRecord(row, chart.chartData);
 }
 
 // target: see the note on computeTransitData — any future way of picking
@@ -299,10 +324,10 @@ export async function getOrCreateTransitChart(
         localTime:         resolved.localTime,
         timezone:          resolved.timezone,
         placeLabel:        resolved.placeLabel,
-        transitData:       JSON.stringify(transitData),
+        transitData:       JSON.stringify(toStored(transitData)),
       },
     });
-    return toRecord(row);
+    return toRecord(row, chart.chartData);
   } catch (err) {
     // Race: another call created the same resolved row first — the
     // @@unique constraint is the source of truth, so just re-read it.
