@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateTransitChart, getTransitChartById, ChartNotFoundError } from "@/lib/transits";
-import { getOrCreateTransitOpener } from "@/lib/interpret";
+import { resolveTransitOpener, type TransitOpenerResult } from "@/lib/interpret";
 import { TransitTargetInput, parsePlaceQueryParams } from "@/lib/validation";
 
 type Ctx = { params: { id: string } };
+
+// The transit resolved fine either way; a failed opener generation degrades to
+// opener: null + a typed reason so the client can show a specific fallback
+// (rate-limited vs. generic failure) instead of crashing on undefined.
+function withOpener<T>(record: T, opener: TransitOpenerResult) {
+  return opener.ok
+    ? { ...record, opener: opener.record.content, openerFailure: null }
+    : { ...record, opener: null, openerFailure: opener.reason };
+}
 
 export async function GET(req: NextRequest, { params }: Ctx) {
   const sp = req.nextUrl.searchParams;
@@ -18,8 +27,8 @@ export async function GET(req: NextRequest, { params }: Ctx) {
       if (!record || record.chartId !== params.id) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
-      const opener = await getOrCreateTransitOpener(params.id, record.id);
-      return NextResponse.json({ ...record, opener: opener.content });
+      const opener = await resolveTransitOpener(params.id, record.id);
+      return NextResponse.json(withOpener(record, opener));
     } catch (err) {
       console.error("[GET transits]", err);
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
@@ -52,8 +61,8 @@ export async function GET(req: NextRequest, { params }: Ctx) {
     const record = await getOrCreateTransitChart(params.id, parsed.data);
     // The opener is fetched alongside the transit itself so date-select can
     // render the transient reading in one round trip — see the transits page.
-    const opener = await getOrCreateTransitOpener(params.id, record.id);
-    return NextResponse.json({ ...record, opener: opener.content });
+    const opener = await resolveTransitOpener(params.id, record.id);
+    return NextResponse.json(withOpener(record, opener));
   } catch (err) {
     if (err instanceof ChartNotFoundError) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });

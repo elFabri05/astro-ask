@@ -1,4 +1,4 @@
-import { generateText } from "ai";
+import { generateText, APICallError, RetryError } from "ai";
 import { google } from "@ai-sdk/google";
 import { prisma } from "./db";
 import { getBirthChart } from "./charts";
@@ -86,6 +86,23 @@ export async function getNatalInterpretation(
   return row ? toRecord(row) : null;
 }
 
+// ─── failure classification ───────────────────────────────────────────────────
+
+// Gemini quota exhaustion arrives as an HTTP 429 (RESOURCE_EXHAUSTED), usually
+// wrapped in a RetryError once the SDK's automatic retries give up. The message
+// regex is a fallback for errors that reach us in other shapes.
+export function isRateLimitError(err: unknown): boolean {
+  if (RetryError.isInstance(err)) return err.errors.some(isRateLimitError);
+  if (APICallError.isInstance(err)) return err.statusCode === 429;
+  return err instanceof Error && /quota|rate.?limit|resource.?exhausted/i.test(err.message);
+}
+
+export type OpenerFailureReason = "rate_limited" | "generation_failed";
+
+export type TransitOpenerResult =
+  | { ok: true;  record: InterpretationRecord }
+  | { ok: false; reason: OpenerFailureReason };
+
 // ─── transit opener (cost optimization for sessions) ──────────────────────────
 //
 // A "New session" over an already-explored (chartId, targetDate) must reuse
@@ -122,6 +139,27 @@ export async function getOrCreateTransitOpener(
   });
 
   return toRecord(row);
+}
+
+// Non-throwing variant for the read paths that render the transient view (the
+// transits page and GET /api/charts/:id/transits): a failed generation must
+// degrade to a typed failure the UI can show, never take down the whole
+// response. ChartNotFoundError still throws — that's the caller's 404, not an
+// opener failure. The throwing getOrCreateTransitOpener stays for session
+// promotion, where the opener is expected to already be cached.
+export async function resolveTransitOpener(
+  chartId: string,
+  transitChartId: string
+): Promise<TransitOpenerResult> {
+  try {
+    const record = await getOrCreateTransitOpener(chartId, transitChartId);
+    return { ok: true, record };
+  } catch (err) {
+    if (err instanceof ChartNotFoundError) throw err;
+    const reason: OpenerFailureReason = isRateLimitError(err) ? "rate_limited" : "generation_failed";
+    console.error(`[transit opener] generation failed (${reason}) for transit ${transitChartId}:`, err);
+    return { ok: false, reason };
+  }
 }
 
 // ─── session title (promotion from transient view) ────────────────────────────

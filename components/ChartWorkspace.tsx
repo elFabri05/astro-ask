@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { ChartData } from "@/lib/ephemeris";
+import type { OpenerFailureReason } from "@/lib/interpret";
 import type {
   SessionSummary, SessionWithMessages, MessageRecord, ChartSessionEntry,
 } from "@/lib/sessions";
@@ -38,16 +39,19 @@ interface ChartInfo {
 // The resolved TransitChart currently loaded — the unit sessions group by.
 // localTime/placeLabel are null when defaulted (noon UTC, natal location).
 // opener is the cached transient reading, computed eagerly on date-select
-// independent of whether any Session exists yet for this combination.
+// independent of whether any Session exists yet for this combination; when
+// its generation failed (opener null), openerFailure says why so the
+// transient view can show a specific, retryable fallback.
 interface TransitContext {
-  id:         string;
-  targetDate: string;
-  localTime:  string | null;
-  timezone:   string | null;
-  placeLabel: string | null;
-  latitude:   number;
-  longitude:  number;
-  opener:     string;
+  id:            string;
+  targetDate:    string;
+  localTime:     string | null;
+  timezone:      string | null;
+  placeLabel:    string | null;
+  latitude:      number;
+  longitude:     number;
+  opener:        string | null;
+  openerFailure: OpenerFailureReason | null;
 }
 
 interface Props {
@@ -93,6 +97,7 @@ export function ChartWorkspace({
   const [history, setHistory]     = useState<ChartSessionEntry[]>(initialHistory);
   const [applying, setApplying]   = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [openerRetrying, setOpenerRetrying] = useState(false);
   const [switcherBusy, setSwitcherBusy] = useState(false);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -174,6 +179,29 @@ export function ChartWorkspace({
       updateUrl(nextTransit, nextActive?.id ?? null);
     } finally {
       setApplying(false);
+    }
+  }
+
+  // Re-attempts opener generation for the loaded transit after a failure
+  // (e.g. the model was rate-limited). Refetching by id hits the cache-miss
+  // path server-side, which generates and caches on success.
+  async function handleRetryOpener() {
+    if (openerRetrying) return;
+    setOpenerRetrying(true);
+    try {
+      const next: TransitContext = await fetch(
+        `/api/charts/${chart.id}/transits?transitChartId=${transit.id}`
+      ).then(r => r.json());
+      setTransit(prev =>
+        prev.id === next.id
+          ? { ...prev, opener: next.opener, openerFailure: next.openerFailure }
+          : prev
+      );
+    } catch {
+      // Network failure — keep the existing failed state; the fallback stays
+      // visible and the user can retry again.
+    } finally {
+      setOpenerRetrying(false);
     }
   }
 
@@ -425,6 +453,9 @@ export function ChartWorkspace({
               chartId={chart.id}
               transitChartId={transit.id}
               openerText={transit.opener}
+              openerFailure={transit.openerFailure}
+              openerLoading={openerRetrying}
+              onRetryOpener={() => void handleRetryOpener()}
               onPromoted={handlePromoted}
             />
           )}

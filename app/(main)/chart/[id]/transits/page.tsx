@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { getBirthChart } from "@/lib/charts";
 import { getOrCreateTransitChart, getTransitChartById, type TransitChartRecord } from "@/lib/transits";
-import { getOrCreateTransitOpener } from "@/lib/interpret";
+import { resolveTransitOpener } from "@/lib/interpret";
 import {
   listSessions, listSessionsForChart, getSession, getMessages, type SessionSummary,
 } from "@/lib/sessions";
@@ -61,7 +61,9 @@ export default async function ChartTransitsPage({ params, searchParams }: Props)
       place,
     });
   }
-  const opener = await getOrCreateTransitOpener(params.id, transitChart.id);
+  // Non-throwing: a failed generation (e.g. Gemini quota) must not 500 the
+  // page — the workspace renders a retryable fallback for the opener instead.
+  const opener = await resolveTransitOpener(params.id, transitChart.id);
   const sessions = await listSessions(params.id, transitChart.id);
   const history = await listSessionsForChart(params.id);
 
@@ -96,8 +98,9 @@ export default async function ChartTransitsPage({ params, searchParams }: Props)
           timezone:   transitChart.timezone,
           placeLabel: transitChart.placeLabel,
           latitude:   transitChart.latitude,
-          longitude:  transitChart.longitude,
-          opener:     opener.content,
+          longitude:     transitChart.longitude,
+          opener:        opener.ok ? opener.record.content : null,
+          openerFailure: opener.ok ? null : opener.reason,
         }}
         initialSessions={sessions}
         initialActive={active}
