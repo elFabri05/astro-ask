@@ -163,6 +163,25 @@ INTERPRETATION GUIDANCE — read and interpret the data in two stages, in this o
 - Do not list raw data back; synthesize it into meaning.`.trimStart();
 }
 
+// Opener-only addition to the system prompt. Appended by the transit opener
+// generation call (lib/interpret.ts) and NOWHERE else — the session chat route
+// reuses buildTransitSystemPrompt() + buildTransitContext() without this, so
+// follow-up replies never end with the flourish.
+export function buildTransitOpenerInstruction(): string {
+  return `
+
+CLOSING LINE — for this opening interpretation only:
+- End the reading with a final paragraph of ONE or TWO short sentences, no more.
+- Its tone is slightly poetic and evocative: a single image that gathers the theme of the reading
+  above it. It is not a summary, not advice, and not a sign-off.
+- Don't make reference to planets position, houses or aspects.
+- It must introduce NO new astrological information: no planet, sign, degree, house, aspect, or
+  date that was not already named in the interpretation above. It reflects what was said; it never
+  adds.
+- No fortune-telling and no promises about outcomes.
+- Plain prose only: no quotation marks, no emoji, no heading or label before it.`;
+}
+
 // Section A — the sky's own configuration: transiting positions and the
 // aspects transiting planets form with EACH OTHER. True for everyone at this
 // instant, independent of any one chart. Interpreted first (see

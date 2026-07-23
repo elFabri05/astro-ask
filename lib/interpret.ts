@@ -5,7 +5,7 @@ import { getBirthChart } from "./charts";
 import { getTransitChartById, ChartNotFoundError, type TransitData } from "./transits";
 import {
   buildNatalSystemPrompt, buildNatalUserPrompt,
-  buildTransitSystemPrompt, buildTransitContext,
+  buildTransitSystemPrompt, buildTransitContext, buildTransitOpenerInstruction,
   buildTitleSystemPrompt, buildTitleUserPrompt,
 } from "./prompts";
 
@@ -127,7 +127,9 @@ export async function getOrCreateTransitOpener(
   if (!chart) throw new ChartNotFoundError(`Chart not found: ${chartId}`);
   if (!transitChart) throw new Error(`Transit chart not found: ${transitChartId}`);
 
-  const system = buildTransitSystemPrompt();
+  // Opener-only: the poetic closing-line instruction is appended here and NOT
+  // in the session chat route, so follow-up replies stay plain.
+  const system = buildTransitSystemPrompt() + buildTransitOpenerInstruction();
   const prompt =
     buildTransitContext(chart.chartData, transitChart.transitData) +
     "\n\nWrite the opening transit interpretation now.";
