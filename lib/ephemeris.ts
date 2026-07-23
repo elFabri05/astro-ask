@@ -1,5 +1,13 @@
 import * as swe from "sweph";
+import path from "path";
 import { computeAspects, type Aspect, type AspectOrbConfig } from "./aspects";
+
+// Swiss ephemeris data directory — holds seas_18.se1 (Chiron/asteroids) and
+// sepl_18.se1 (planets; required by sweph to reduce asteroid positions to
+// geocentric). Only Chiron reads from it today; every other body stays on
+// Moshier. See README for where to put the files.
+const EPHE_PATH = process.env.SE_EPHE_PATH ?? path.join(process.cwd(), "ephe");
+swe.set_ephe_path(EPHE_PATH);
 
 // ─── aspect configuration ────────────────────────────────────────────────────
 const NATAL_ORBS: readonly AspectOrbConfig[] = [
@@ -15,13 +23,18 @@ const SIGNS = [
   "Libra", "Scorpio", "Sagittarius", "Capricorn", "Aquarius", "Pisces",
 ] as const;
 
-// Moshier flag — no ephemeris files required. To switch to high-precision
-// Swiss files: download sepl_18/semo_18/seas_18.se1, call swe.set_ephe_path(dir),
-// and replace SEFLG_MOSEPH with SEFLG_SWIEPH here (and update EPHEMERIS_MODE).
+// Moshier flag — no ephemeris files required for the ten planets + True Node.
+// To switch EVERYTHING to high-precision Swiss files: also download
+// sepl_18/semo_18.se1 into EPHE_PATH and replace SEFLG_MOSEPH with
+// SEFLG_SWIEPH here (and update EPHEMERIS_MODE).
 export const CALC_FLAGS = swe.constants.SEFLG_MOSEPH | swe.constants.SEFLG_SPEED;
 export const EPHEMERIS_MODE: "swieph" | "moseph" = "moseph";
 
-export const PLANET_BODIES: Array<{ id: number; name: string; optional?: true }> = [
+// Chiron is the exception: Moshier has no asteroid theory, so it must use the
+// Swiss file mode against seas_18.se1 (+ sepl_18.se1) in EPHE_PATH.
+const CHIRON_FLAGS = swe.constants.SEFLG_SWIEPH | swe.constants.SEFLG_SPEED;
+
+export const PLANET_BODIES: Array<{ id: number; name: string; optional?: true; flags?: number }> = [
   { id: swe.constants.SE_SUN,       name: "Sun"       },
   { id: swe.constants.SE_MOON,      name: "Moon"      },
   { id: swe.constants.SE_MERCURY,   name: "Mercury"   },
@@ -33,8 +46,38 @@ export const PLANET_BODIES: Array<{ id: number; name: string; optional?: true }>
   { id: swe.constants.SE_NEPTUNE,   name: "Neptune"   },
   { id: swe.constants.SE_PLUTO,     name: "Pluto"     },
   { id: swe.constants.SE_TRUE_NODE, name: "True Node" },
-  { id: swe.constants.SE_CHIRON,    name: "Chiron", optional: true },
+  { id: swe.constants.SE_CHIRON,    name: "Chiron", optional: true, flags: CHIRON_FLAGS },
 ];
+
+// One warning per body per process — a missing seas_*.se1 would otherwise
+// log on every chart/transit computation.
+const warnedMissingBodies = new Set<string>();
+
+// calc_ut for one PLANET_BODIES entry. Required bodies throw on failure, as
+// before. Optional bodies (Chiron) degrade gracefully: warn once and return
+// null so callers omit them — a missing ephemeris file must never break
+// chart, transit, or scan computation.
+export function calcBodyLongitude(
+  jd_ut: number,
+  planet: (typeof PLANET_BODIES)[number]
+): { lon: number; lonSpeed: number } | null {
+  const res = swe.calc_ut(jd_ut, planet.id, planet.flags ?? CALC_FLAGS);
+  if (res.flag < 0) {
+    if (planet.optional) {
+      if (!warnedMissingBodies.has(planet.name)) {
+        warnedMissingBodies.add(planet.name);
+        console.warn(
+          `[ephemeris] ${planet.name} unavailable, omitting from charts ` +
+          `(expected data file in ${EPHE_PATH}): ${res.error}`
+        );
+      }
+      return null;
+    }
+    throw new Error(`calc_ut failed for ${planet.name}: ${res.error}`);
+  }
+  const [lon, , , lonSpeed] = res.data;
+  return { lon, lonSpeed };
+}
 
 // ─── interfaces ───────────────────────────────────────────────────────────────
 
@@ -127,12 +170,9 @@ export function computeNatalChart(input: {
   const positions: PlanetPosition[] = [];
 
   for (const planet of PLANET_BODIES) {
-    const res = swe.calc_ut(jd_ut, planet.id, CALC_FLAGS);
-    if (res.flag < 0) {
-      if (planet.optional) continue; // Chiron requires swieph file; skip gracefully
-      throw new Error(`calc_ut failed for ${planet.name}: ${res.error}`);
-    }
-    const [lon, , , lonSpd] = res.data;
+    const calc = calcBodyLongitude(jd_ut, planet);
+    if (calc === null) continue; // optional body (Chiron) unavailable — omitted
+    const { lon, lonSpeed } = calc;
     const { sign, signDegree } = lonToSignInfo(lon);
     positions.push({
       body: planet.name,
@@ -140,8 +180,8 @@ export function computeNatalChart(input: {
       sign,
       signDegree,
       house: 0, // assigned below once cusps are known
-      retrograde: lonSpd < 0,
-      lonSpeed: lonSpd,
+      retrograde: lonSpeed < 0,
+      lonSpeed,
     });
   }
 

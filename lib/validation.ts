@@ -64,6 +64,13 @@ export const RankedEventInput = z.object({
   strength:  z.number(),
   relevance: z.number(),
   score:     z.number(),
+  // Eclipse facts computed at detection (lib/events/detect.ts). Optional —
+  // only syzygies carry them — but they MUST be declared here or zod strips
+  // them on echo-back and the interpretation would never see eclipse status.
+  isEclipse:     z.boolean().optional(),
+  eclipseType:   z.enum(["solar", "lunar"]).optional(),
+  nodalDistance: z.number().optional(),
+  nodeUsed:      z.enum(["North", "South"]).optional(),
 });
 
 export const EventsInterpretInput = z.object({

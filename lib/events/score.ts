@@ -24,6 +24,12 @@ export const WEIGHTS = {
   // Moon phases by elongation angle: the syzygies (new/full) carry the
   // month; the quarters are secondary beats.
   moonPhase: { 0: 5, 90: 3, 180: 5.5, 270: 3 } as Record<number, number>,
+
+  // Eclipses are flagged deterministically in detect.ts (node proximity) and
+  // outrank ordinary lunations decisively — an eclipse marks the season, a
+  // plain lunation marks the month. Solar edges out lunar as the stronger
+  // new-beginning signature.
+  eclipse: { solar: 9, lunar: 8.5 } as Record<string, number>,
 } as const;
 
 function bodyWeight(body: string): number {
@@ -33,6 +39,9 @@ function bodyWeight(body: string): number {
 export function scoreStrength(event: DetectedEvent): number {
   switch (event.kind) {
     case "moon_phase":
+      if (event.isEclipse && event.eclipseType) {
+        return WEIGHTS.eclipse[event.eclipseType] ?? WEIGHTS.moonPhase[event.angle] ?? 3;
+      }
       return WEIGHTS.moonPhase[event.angle] ?? 3;
     case "aspect": {
       const mean = (bodyWeight(event.bodies[0]) + bodyWeight(event.bodies[1])) / 2;

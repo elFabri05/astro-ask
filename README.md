@@ -46,13 +46,28 @@ the orb table takes effect immediately rather than being frozen into old rows.
 |------------|--------|
 | Framework  | Next.js 14 (App Router), React 18 |
 | Language   | TypeScript |
-| Ephemeris  | [`sweph`](https://www.npmjs.com/package/sweph) (Swiss Ephemeris), Moshier mode — no ephemeris data files required |
+| Ephemeris  | [`sweph`](https://www.npmjs.com/package/sweph) (Swiss Ephemeris), Moshier mode for the ten planets + True Node (no data files); Chiron via Swiss file mode (see below) |
 | Houses     | Placidus |
 | Geocoding  | `node-geocoder`; timezone from `geo-tz`; date math with `luxon` |
 | Chart wheel| `@astrodraw/astrochart` |
 | Database   | SQLite via Prisma (`prisma/dev.db`) — schema stays portable to Postgres |
 | LLM SDK    | Vercel AI SDK (`ai`) with `@ai-sdk/google` |
 | Validation | `zod` |
+
+### Chiron ephemeris data
+
+Chiron has no Moshier theory, so it is computed in Swiss file mode against data
+files in `ephe/` at the repo root (override the directory with the
+`SE_EPHE_PATH` env var):
+
+- `ephe/seas_18.se1` — main asteroids incl. Chiron, 1800–2399 AD
+- `ephe/sepl_18.se1` — planets; required by Swiss Ephemeris to reduce asteroid
+  positions to geocentric
+
+Both come from the [official Swiss Ephemeris repo](https://github.com/aloistr/swisseph/tree/master/ephe).
+If the files are missing (or the date falls outside their range), Chiron is
+omitted from charts with a single logged warning — nothing throws, and every
+other body is unaffected.
 
 ### Layout
 

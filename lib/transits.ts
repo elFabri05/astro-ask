@@ -1,8 +1,8 @@
 import * as swe from "sweph";
 import {
   PLANET_BODIES,
-  CALC_FLAGS,
   EPHEMERIS_MODE,
+  calcBodyLongitude,
   lonToSignInfo,
   assignHouse,
   type PlanetPosition,
@@ -231,12 +231,9 @@ export function computeTransitData(input: {
 
   const transitingPositions: PlanetPosition[] = [];
   for (const planet of PLANET_BODIES) {
-    const res = swe.calc_ut(jd_ut, planet.id, CALC_FLAGS);
-    if (res.flag < 0) {
-      if (planet.optional) continue; // Chiron requires swieph file; skip gracefully
-      throw new Error(`calc_ut failed for ${planet.name}: ${res.error}`);
-    }
-    const [lon, , , lonSpd] = res.data;
+    const calc = calcBodyLongitude(jd_ut, planet);
+    if (calc === null) continue; // optional body (Chiron) unavailable — omitted
+    const { lon, lonSpeed } = calc;
     const { sign, signDegree } = lonToSignInfo(lon);
     transitingPositions.push({
       body: planet.name,
@@ -244,7 +241,7 @@ export function computeTransitData(input: {
       sign,
       signDegree,
       house: assignHouse(lon, natalCusps), // natal house, not a recomputed one
-      retrograde: lonSpd < 0,
+      retrograde: lonSpeed < 0,
     });
   }
 

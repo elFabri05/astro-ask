@@ -4,8 +4,10 @@
 // Nothing else — no stations, no ingresses, no orb tracking.
 //
 // Deliberately samples ONLY the ten Sun–Pluto bodies via calc_ut, one call
-// per body per day. Chiron and the nodes are skipped: they pull in the
-// seas_*.se1 ephemeris-file dependency and aren't needed for sky events.
+// per body per day. Chiron is skipped: it pulls in the seas_*.se1
+// ephemeris-file dependency and isn't needed for sky events. The True Node
+// is not swept daily either — it is evaluated only at refined new/full moon
+// instants to classify eclipses (see classifyEclipse below).
 //
 // Everything here is deterministic astronomy. Crossings are bracketed
 // between daily samples and refined by bisection (recomputing longitudes at
@@ -51,6 +53,13 @@ export interface DetectedEvent {
   angle: number;
   label: string;           // short human text, built from computed facts only
   factors: string[];       // involved planet names, for topic-relevance overlap
+  // Eclipse fields — set on new/full moons only (see classifyEclipse), all
+  // COMPUTED from node proximity. The model never decides eclipse status; it
+  // receives these as facts.
+  isEclipse?: boolean;
+  eclipseType?: "solar" | "lunar";
+  nodalDistance?: number;  // degrees from the Sun to the nearer node at the instant
+  nodeUsed?: "North" | "South";
 }
 
 export interface ScanInput {
@@ -207,6 +216,55 @@ export function findCrossings(
   return crossings;
 }
 
+// ─── eclipse classification ───────────────────────────────────────────────────
+//
+// Standard ASTROLOGICAL node-proximity approximation: a new moon is a solar
+// eclipse when the Sun is within ~18° of a lunar node, a full moon is a lunar
+// eclipse within ~12°. This flags eclipses reliably at the dates the syzygy
+// detection already refined, but does NOT determine type (total/partial/
+// annular), magnitude, or visibility — sweph's dedicated eclipse functions
+// (swe_sol_eclipse_when_glob / swe_lun_eclipse_when) are the upgrade path if
+// that precision is ever wanted.
+//
+// Distances use the TRUE Node (consistent with natal/transit computation,
+// SE_TRUE_NODE); the Mean Node would give slightly different distances near
+// the limits.
+
+export const SOLAR_ECLIPSE_LIMIT_DEG = 18; // new moon: Sun within this of a node
+export const LUNAR_ECLIPSE_LIMIT_DEG = 12; // full moon: Sun within this of a node
+
+// True Node longitude at an instant. Works under Moshier (no data files) —
+// the node comes from lunar theory, not the asteroid ephemeris.
+function trueNodeLongitudeAt(dateMs: number): number {
+  const res = swe.calc_ut(jdUt(dateMs), swe.constants.SE_TRUE_NODE, CALC_FLAGS);
+  if (res.flag < 0) throw new Error(`calc_ut failed for True Node: ${res.error}`);
+  return res.data[0];
+}
+
+interface EclipseInfo {
+  isEclipse: boolean;
+  eclipseType: "solar" | "lunar";
+  nodalDistance: number;
+  nodeUsed: "North" | "South";
+}
+
+// Classify a refined syzygy instant (angle 0 = new moon, 180 = full moon).
+// The nodal axis is a line: compare the Sun against both ends and take the
+// nearer one.
+function classifyEclipse(angle: 0 | 180, dateMs: number, sunLon: number): EclipseInfo {
+  const northLon = trueNodeLongitudeAt(dateMs);
+  const distNorth = Math.abs(wrap180(sunLon - northLon));
+  const distSouth = Math.abs(wrap180(sunLon - (northLon + 180)));
+
+  const [nodalDistance, nodeUsed]: [number, "North" | "South"] =
+    distNorth <= distSouth ? [distNorth, "North"] : [distSouth, "South"];
+
+  const eclipseType = angle === 0 ? "solar" as const : "lunar" as const;
+  const limit = angle === 0 ? SOLAR_ECLIPSE_LIMIT_DEG : LUNAR_ECLIPSE_LIMIT_DEG;
+
+  return { isEclipse: nodalDistance <= limit, eclipseType, nodalDistance, nodeUsed };
+}
+
 // ─── event composition ────────────────────────────────────────────────────────
 
 const MOON_PHASES: Record<number, string> = {
@@ -248,18 +306,35 @@ export function scanEvents({ startDate, endDate, stepDays = 1 }: ScanInput): Det
 
   const events: DetectedEvent[] = [];
 
-  // Moon phases: Sun–Moon elongation crossing the four phase angles.
+  // Moon phases: Sun–Moon elongation crossing the four phase angles. The
+  // syzygies (new/full) are additionally classified for eclipses by node
+  // proximity at the same refined instant — see classifyEclipse.
   for (const c of findCrossings(series.get("Moon")!, series.get("Sun")!, [0, 90, 180, 270])) {
     const phase = MOON_PHASES[c.angle];
     const moonLon = longitudeAt("Moon", c.dateMs);
-    events.push({
+
+    const event: DetectedEvent = {
       date: isoDate(c.dateMs),
       kind: "moon_phase",
       bodies: ["Moon", "Sun"],
       angle: c.angle,
       label: `${phase} at ${fmtDegSign(moonLon)}`,
       factors: ["Moon", "Sun"],
-    });
+    };
+
+    if (c.angle === 0 || c.angle === 180) {
+      const sunLon = longitudeAt("Sun", c.dateMs);
+      const eclipse = classifyEclipse(c.angle, c.dateMs, sunLon);
+      Object.assign(event, eclipse);
+      if (eclipse.isEclipse) {
+        const kindLabel = eclipse.eclipseType === "solar" ? "Solar eclipse" : "Lunar eclipse";
+        event.label =
+          `${kindLabel} (${phase.toLowerCase()}) at ${fmtDegSign(moonLon)} ` +
+          `near the ${eclipse.nodeUsed} Node`;
+      }
+    }
+
+    events.push(event);
   }
 
   // Major aspects between planet pairs (Moonless, see ASPECT_BODIES).

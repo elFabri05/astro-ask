@@ -288,6 +288,10 @@ STRICT CONSTRAINTS — follow these without exception:
    not in the list. The list is the only ground truth about the upcoming sky.
 2. State each event's date exactly as given. If asked about a date or event not in the list, say
    the scan did not surface it rather than speculating.
+2b. Eclipse status is COMPUTED, never yours to judge: an event is an eclipse if and only if it is
+   explicitly marked as one in the list (with its type and nodal distance). Interpret a marked
+   eclipse as an eclipse. Never infer, suggest, or deny eclipse status for any other lunation —
+   not even one close to a node.
 3. Ground the "why it matters" in the supplied natal chart facts and the event's own factors —
    name the natal placements and houses involved, never invented ones.
 4. The facts are given fresh in every call. You have no memory of prior charts or scans.
@@ -319,9 +323,17 @@ export function buildEventsInterpretationPrompt(
   lines.push("");
 
   lines.push("## Upcoming Events (deterministically detected and dated — ranked, strongest first)");
+  lines.push("(Eclipse status below is computed from node proximity. An event is an eclipse only");
+  lines.push("if marked ECLIPSE; treat every other lunation as an ordinary new/full moon.)");
   events.forEach((e, i) => {
     lines.push(`${i + 1}. ${e.date} — ${e.label}`);
     lines.push(`   kind: ${e.kind}; factors: ${e.factors.join(", ")}`);
+    if (e.isEclipse && e.eclipseType && e.nodalDistance !== undefined) {
+      lines.push(
+        `   ECLIPSE (computed): ${e.eclipseType} — Sun ${e.nodalDistance.toFixed(1)}° from the ` +
+        `${e.nodeUsed} Node at the exact lunation`
+      );
+    }
   });
   lines.push("");
 
