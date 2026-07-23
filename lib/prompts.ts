@@ -174,12 +174,12 @@ CLOSING LINE — for this opening interpretation only:
 - End the reading with a final paragraph of ONE or TWO short sentences, no more.
 - Its tone is slightly poetic and evocative: a single image that gathers the theme of the reading
   above it. It is not a summary, not advice, and not a sign-off.
-- Don't make reference to planets position, houses or aspects.
+- Don't make reference to planet positions, houses, or aspects.
 - It must introduce NO new astrological information: no planet, sign, degree, house, aspect, or
   date that was not already named in the interpretation above. It reflects what was said; it never
   adds.
-- No fortune-telling and no promises about outcomes.
-- Plain prose only: no quotation marks, no emoji, no heading or label before it.`;
+- Plain prose only: no quotation marks, no emoji, no heading or label before it.
+- No fortune-telling and no promises about outcomes.`;
 }
 
 // Section A — the sky's own configuration: transiting positions and the
